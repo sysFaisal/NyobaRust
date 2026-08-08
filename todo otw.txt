@@ -1,0 +1,164 @@
+Misalnya fitur Tambah Produk.
+routes/product.rs
+
+use axum::{routing::post, Router};
+use crate::handlers::product::create_product;
+pub fn routes() -> Router {
+    Router::new().route("/products", post(create_product))
+}
+
+
+
+handlers/product.rs
+use axum::Json;
+use crate::{
+    dto::request::CreateProductRequest,
+    services::product,
+};
+pub async fn create_product(
+    Json(req): Json<CreateProductRequest>,
+) {
+    product::create_product(req).await;
+}
+Handler hanya menerima request lalu memanggil service.
+
+
+
+services/product.rs
+use crate::{
+    db,
+    dto::request::CreateProductRequest,
+};
+
+pub async fn create_product(req: CreateProductRequest) {
+    // Contoh validasi sederhana
+    if req.name.is_empty() {
+        return;
+    }
+
+    db::product::insert_product(req).await;
+}
+Service berisi logika bisnis, misalnya validasi.
+
+
+db/product.rs
+use crate::dto::request::CreateProductRequest;
+
+pub async fn insert_product(req: CreateProductRequest) {
+    println!(
+        "INSERT INTO products (name, price) VALUES ('{}', {})",
+        req.name,
+        req.price
+    );
+
+    // Nanti diganti dengan sqlx::query(...)
+}
+
+Di sini nanti isi dengan sqlx::query(...).
+
+dto/request.rs
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct CreateProductRequest {
+    pub name: String,
+    pub price: i64,
+}
+
+src/
+│
+├── main.rs
+│   ├── Titik awal aplikasi.
+│   ├── Membaca file .env.
+│   ├── Membuat koneksi database.
+│   ├── Membuat AppState (jika ada).
+│   ├── Memasang semua routes.
+│   └── Menjalankan server Axum.
+│
+├── config/
+│   └── database.rs
+│       ├── Konfigurasi database PostgreSQL.
+│       ├── Membuat PgPool (connection pool).
+│       └── Menyimpan fungsi connect_db().
+│
+├── models/
+│   ├── user.rs
+│   │   └── Struct User yang merepresentasikan data user.
+│   │
+│   ├── product.rs
+│   │   └── Struct Product yang merepresentasikan data produk.
+│   │
+│   └── transaction.rs
+│       └── Struct Transaction yang merepresentasikan data transaksi.
+│
+├── handlers/
+│   ├── auth.rs
+│   │   ├── Endpoint login.
+│   │   └── Endpoint logout.
+│   │
+│   ├── product.rs
+│   │   ├── Endpoint tambah produk.
+│   │   ├── Endpoint edit produk.
+│   │   ├── Endpoint hapus produk.
+│   │   └── Endpoint daftar produk.
+│   │
+│   └── transaction.rs
+│       ├── Endpoint membuat transaksi.
+│       ├── Endpoint melihat riwayat transaksi.
+│       └── Endpoint detail transaksi.
+│
+├── routes/
+│   └── mod.rs
+│       ├── Menghubungkan URL dengan handler.
+│       ├── Contoh:
+│       │     POST /login
+│       │     GET /products
+│       │     POST /transactions
+│       └── Semua route dikumpulkan di sini.
+│
+├── services/
+│   ├── auth.rs
+│   │   ├── Logika login.
+│   │   ├── Verifikasi password.
+│   │   └── Membuat JWT (jika digunakan).
+│   │
+│   ├── product.rs
+│   │   ├── Validasi data produk.
+│   │   ├── Logika tambah/edit/hapus produk.
+│   │   └── Memanggil fungsi pada folder db.
+│   │
+│   └── transaction.rs
+│       ├── Mengecek stok.
+│       ├── Mengurangi stok.
+│       ├── Menghitung total harga.
+│       └── Menyimpan transaksi ke database.
+│
+├── db/
+│   ├── user.rs
+│   │   └── Semua query SQL yang berhubungan dengan tabel users.
+│   │
+│   ├── product.rs
+│   │   └── Semua query SQL yang berhubungan dengan tabel products.
+│   │
+│   └── transaction.rs
+│       └── Semua query SQL yang berhubungan dengan tabel transactions.
+│
+├── dto/
+│   ├── request.rs
+│   │   ├── Struct untuk menerima request dari client.
+│   │   ├── Contoh:
+│   │   │     LoginRequest
+│   │   │     CreateProductRequest
+│   │   │     CreateTransactionRequest
+│   │
+│   └── response.rs
+│       ├── Struct untuk response API.
+│       ├── Contoh:
+│       │     LoginResponse
+│       │     ProductResponse
+│       │     TransactionResponse
+│
+└── error.rs
+    ├── Menyimpan AppError.
+    ├── Mengubah error menjadi HTTP Response.
+    └── Digunakan oleh seluruh aplikasi agar penanganan error konsisten.
