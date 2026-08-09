@@ -3,8 +3,12 @@ use serde::Serialize;
 use sqlx;
 
 pub enum AppError {
-    Database(sqlx::Error),
     NotFound,
+    Unauthorized,
+    Forbidden,
+    Conflict,
+    Database(sqlx::Error),
+    BadRequest(Option<String>)
 }
 
 #[derive(Serialize)]
@@ -39,6 +43,13 @@ impl IntoResponse for AppError {
                 }),
             )
                 .into_response(),
+
+            AppError::BadRequest(Some(e_msg)) => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrMsgClient{
+                    error: e_msg,
+                }),
+            ).into_response()
         }
     }
 }

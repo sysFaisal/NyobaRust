@@ -1,6 +1,5 @@
 use axum::{Router, routing::get};
 use sqlx::PgPool;
-
 use crate::handlers::user;
 
 async fn hello() -> &'static str {
@@ -9,10 +8,13 @@ async fn hello() -> &'static str {
 
 pub fn route_user() -> Router<PgPool> {
     Router::new()
-        .route("/", get(user::get_all_user).post(hello))
+        .route("/", get(user::get_all_user).post(user::create_user))
         .route(
             "/{id}",
-            get(hello).put(hello).patch(hello).delete(hello),
+            get(user::get_user_by_id)
+                .put(hello)
+                .patch(hello)
+                .delete(user::delete_data_user),
         )
 }
 
