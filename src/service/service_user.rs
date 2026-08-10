@@ -1,6 +1,3 @@
-use std::result;
-
-use axum::Json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -49,42 +46,45 @@ pub fn validate_trim_len_string(value: &str, min_length: usize) -> bool {
     true
 }
 
-pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<&'static str, AppError> {
+pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<UserProfile, AppError> {
     if !validate_trim_len_string(&payload.username, 3) {
-        return Err(AppError::BadRequest("Bad Request".to_string()));
+        return Err(AppError::BadRequest(None));
     }
 
     if !validate_trim_len_string(&payload.password, 8) {
-        return Err(AppError::BadRequest(Some("Bad Request".to_string())));
+        return Err(AppError::BadRequest(None));
     }
 
     match &payload.email {
         Some(email) => {
-            sqlx::query!(
-                "INSERT INTO users (username, email, password_hash)
+            let respon = sqlx::query_as!(
+                UserProfile,
+                r#"
+                INSERT INTO users (username, email, password_hash)
                 VALUES ($1, $2, $3)
-                RETURNING id, username, email",
+                RETURNING id, username, email, created_at"#,
                 payload.username,
-                payload.email,
+                email,
                 payload.password,
             )
             .fetch_one(pool)
             .await?;
 
-            Ok("Success")
+            Ok(respon)
         }
         None => {
-            sqlx::query!(
-                "INSERT INTO users (username, password_hash)
+            let respon = sqlx::query_as!(
+                UserProfile,
+                r#"INSERT INTO users (username, password_hash)
                 VALUES ($1, $2)
-                RETURNING id, username, email",
+                RETURNING id, username, email, created_at"#,
                 payload.username,
                 payload.password,
             )
             .fetch_one(pool)
             .await?;
 
-            Ok("Success")
+            Ok(respon)
         }
     }
 }
@@ -99,7 +99,6 @@ pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<&'sta
 //fetch all jadi ok(vec!<t>)
 //fetch option jadi ok(option => (none))
 //execute jadi queryresult diceknya pakai Ok(queryresult)=>affected_row)
-
 
 //query hasilnya tidak dipetakan ke struct
 //query_as dipetakan ke struct

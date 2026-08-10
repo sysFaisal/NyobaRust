@@ -8,3 +8,7 @@ pub struct UserProfile {
     pub email: Option<String>,
     pub created_at: DateTime<Utc>,
 }
+
+pub struct DeleteResponse {
+    pub 
+}
