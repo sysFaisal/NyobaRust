@@ -9,6 +9,3 @@ pub struct UserProfile {
     pub created_at: DateTime<Utc>,
 }
 
-pub struct DeleteResponse {
-    pub 
-}

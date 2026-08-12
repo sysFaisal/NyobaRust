@@ -7,14 +7,15 @@ pub enum AppError {
     Unauthorized,
     Forbidden,
     Conflict,
+    InternalServerError(Option<String>),
     Database(sqlx::Error),
-    BadRequest(Option<String>)
+    BadRequest(Option<String>),
 }
 
 #[derive(Serialize)]
 pub struct ErrMsgClient {
-    code : String,
-    message : String,
+    code: String,
+    message: String,
 }
 
 impl From<sqlx::Error> for AppError {
@@ -31,17 +32,29 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrMsgClient {
-                        code : "INTERNAL_SERVER_ERROR".to_string(),
-                        message : "Internal Server Error".to_string(),
+                        code: "INTERNAL_SERVER_ERROR".to_string(),
+                        message: "Internal Server Error".to_string(),
                     }),
                 )
                     .into_response()
             }
 
+            AppError::InternalServerError(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrMsgClient {
+                    code: "INTERNAL_SERVER_ERROR".to_string(),
+                    message: match err {
+                        Some(e) => e,
+                        None => "Internal Server Error".to_string(),
+                    },
+                }),
+            )
+                .into_response(),
+
             AppError::NotFound => (
                 StatusCode::NOT_FOUND,
                 Json(ErrMsgClient {
-                    code : "NOT_FOUND".to_string(),
+                    code: "NOT_FOUND".to_string(),
                     message: "Not Found".to_string(),
                 }),
             )
@@ -49,39 +62,42 @@ impl IntoResponse for AppError {
 
             AppError::BadRequest(e_msg) => (
                 StatusCode::BAD_REQUEST,
-                Json(ErrMsgClient{
-                    code : "BAD_REQUEST".to_string(),
-                    message : match e_msg {
+                Json(ErrMsgClient {
+                    code: "BAD_REQUEST".to_string(),
+                    message: match e_msg {
                         Some(msg) => msg.to_string(),
                         None => "Bad Request".to_string(),
                     },
                 }),
-            ).into_response(),
+            )
+                .into_response(),
 
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                Json(ErrMsgClient{
-                    code : "UNAUTHORIZED".to_string(),
-                    message : "Authentication required".to_string(),
-                })
-            ).into_response(),
+                Json(ErrMsgClient {
+                    code: "UNAUTHORIZED".to_string(),
+                    message: "Authentication required".to_string(),
+                }),
+            )
+                .into_response(),
 
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
-                Json(ErrMsgClient{
-                    code : "FORBIDDEN".to_string(),
-                    message : "You do not have permission".to_string(),
-                })
-            ).into_response(),
+                Json(ErrMsgClient {
+                    code: "FORBIDDEN".to_string(),
+                    message: "You do not have permission".to_string(),
+                }),
+            )
+                .into_response(),
 
-            
             AppError::Conflict => (
                 StatusCode::CONFLICT,
                 Json(ErrMsgClient {
                     code: "CONFLICT".to_string(),
                     message: "Resource conflict".to_string(),
                 }),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 }

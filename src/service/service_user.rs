@@ -1,9 +1,12 @@
+use hickory_resolver::TokioResolver;
 use sqlx::PgPool;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::dto::request::request_user::CreateUser;
+use crate::dto::request::request_user::{CreateUser, LoginUser};
 use crate::dto::response::response_user::UserProfile;
 use crate::error::error::AppError;
+use crate::service::validation::{hash_password, validate_email, verify_password};
 
 pub async fn svc_get_all_user(pool: &PgPool) -> Result<Vec<UserProfile>, AppError> {
     let users = sqlx::query_as!(
@@ -35,25 +38,69 @@ pub async fn svc_get_user_by_id(
     Ok(users)
 }
 
-pub fn validate_trim_len_string(value: &str, min_length: usize) -> bool {
-    let str_trimmed = value.trim();
-    if str_trimmed.is_empty() {
-        return false;
-    }
-    if str_trimmed.len() < min_length {
-        return false;
-    }
-    true
+pub async fn get_password_by_username(
+    pool: &PgPool,
+    username: &str,
+) -> Result<Option<String>, AppError> {
+    let password_hash = sqlx::query_scalar!(
+        r#"SELECT password_hash FROM users WHERE username = $1"#,
+        username
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(password_hash)
 }
 
-pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<UserProfile, AppError> {
-    if !validate_trim_len_string(&payload.username, 3) {
+pub async fn svc_login_user(pool: &PgPool, payload: &LoginUser) -> Result<String, AppError> {
+    if payload.username.trim().is_empty() {
         return Err(AppError::BadRequest(None));
     }
 
-    if !validate_trim_len_string(&payload.password, 8) {
+    if payload.password.trim().is_empty() {
         return Err(AppError::BadRequest(None));
     }
+
+    let hashed_password = match get_password_by_username(pool, &payload.username).await? {
+        Some(hashed) => hashed,
+        None => return Err(AppError::Unauthorized),
+    };
+
+    match verify_password(&payload.password, &hashed_password) {
+        Ok(true) => {}
+        Ok(false) => return Err(AppError::Unauthorized),
+        Err(_) => return Err(AppError::InternalServerError(None)),
+    }
+
+    Ok("Berhasil".to_string())
+}
+
+pub async fn svc_create_user(
+    dns: &TokioResolver,
+    pool: &PgPool,
+    payload: &mut CreateUser,
+) -> Result<UserProfile, AppError> {
+    payload.username = payload.username.trim().to_string();
+
+    if payload.password.trim().is_empty() {
+        return Err(AppError::BadRequest(None));
+    }
+
+    match payload.validate() {
+        Ok(_) => {}
+        Err(e) => return Err(AppError::BadRequest(Some(e.to_string()))),
+    };
+
+    if let Some(email) = &payload.email {
+        if !validate_email(dns, email.as_str()).await {
+            return Err(AppError::BadRequest(None));
+        }
+    }
+
+    let password_hash = match hash_password(&payload.password.as_str()) {
+        Ok(hash) => hash,
+        Err(_) => return Err(AppError::BadRequest(None)),
+    };
 
     match &payload.email {
         Some(email) => {
@@ -64,8 +111,8 @@ pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<UserP
                 VALUES ($1, $2, $3)
                 RETURNING id, username, email, created_at"#,
                 payload.username,
-                email,
-                payload.password,
+                email.as_str(),
+                password_hash,
             )
             .fetch_one(pool)
             .await?;
@@ -79,7 +126,7 @@ pub async fn svc_create_user(pool: &PgPool, payload: CreateUser) -> Result<UserP
                 VALUES ($1, $2)
                 RETURNING id, username, email, created_at"#,
                 payload.username,
-                payload.password,
+                password_hash,
             )
             .fetch_one(pool)
             .await?;
