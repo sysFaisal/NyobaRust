@@ -1,15 +1,18 @@
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use sqlx::types::JsonValue::Null;
+use axum::http::header::SET_COOKIE;
+use axum::http::{HeaderMap, StatusCode};
+use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::{Cookie, Expiration, SameSite};
+
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::dto::ApiResponse;
 use crate::dto::request::request_user::{CreateUser, LoginUser};
-use crate::dto::response::response_user::UserProfile;
+use crate::dto::response::response_user::{LoginResponse, UserProfile};
 use crate::error::error::AppError;
-use crate::service::service_user;
+use crate::service::service_user::{self, svc_refresh_token};
 
 /*
 Untuk i5-6200U, saya akan coba benchmark begini
@@ -70,23 +73,81 @@ pub async fn create_user(
 pub async fn delete_data_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
     let delete_user_response = service_user::svc_delete_user(&state.db, id).await?;
 
-    Ok(Json(ApiResponse {
-        data: (),
-        message: Some(delete_user_response.to_string()),
-    }))
+    Ok((
+        StatusCode::NO_CONTENT,
+        Json(ApiResponse {
+            data: (),
+            message: Some(delete_user_response.to_string()),
+        }),
+    ))
 }
 
 pub async fn login_user(
     State(state): State<AppState>,
     Json(payload): Json<LoginUser>,
-) -> Result<Json<ApiResponse<String>>, AppError> {
-    let result = service_user::svc_login_user(&state.db, &payload).await?;
+) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<LoginResponse>>), AppError> {
+    let (refresh_cookie_value, expire_at, jwt) =
+        service_user::svc_login_user(&state.db, &payload).await?;
 
-    Ok(Json(ApiResponse {
-        data: "".to_string(),
-        message: Some(result),
-    }))
+    let cookie = Cookie::build(("refresh_token", refresh_cookie_value))
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .expires(Expiration::DateTime(expire_at))
+        .build();
+
+    let mut header = HeaderMap::new();
+    header.insert(SET_COOKIE, cookie.to_string().parse().unwrap());
+
+    Ok((
+        StatusCode::OK,
+        header,
+        Json(ApiResponse {
+            data: LoginResponse {
+                access_token: jwt,
+                token_type: "Bearer".to_string(),
+            },
+            message: Some("Success".to_string()),
+        }),
+    ))
+}
+
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(StatusCode, CookieJar, Json<ApiResponse<LoginResponse>>), AppError> {
+    let cookie = jar.get("refresh_token").ok_or(AppError::Unauthorized)?;
+    let cookie_value = cookie.value();
+
+    let (family_id, incoming_token) = cookie_value
+        .split_once('.')
+        .ok_or(AppError::Unauthorized)?;
+
+    let (new_access_token, new_cookie_value) =
+        svc_refresh_token(&state.db, family_id, incoming_token).await?;
+
+    let new_cookie = Cookie::build(("refresh_token", new_cookie_value))
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .build();
+
+    let new_jar = jar.add(new_cookie);
+
+    Ok((
+        StatusCode::OK,
+        new_jar,
+        Json(ApiResponse {
+            data: LoginResponse {
+                access_token: new_access_token,
+                token_type: "Bearer".to_string(),
+            },
+            message: Some("Success".to_string()),
+        }),
+    ))
 }

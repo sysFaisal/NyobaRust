@@ -11,6 +11,7 @@ mod handlers;
 mod route;
 mod service;
 mod state;
+mod c_auth;
 
 use state::AppState;
 

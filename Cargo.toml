@@ -23,3 +23,8 @@ validator = { version = "0.21.0", features = ["derive"] }
 serde-email = "3.2.0"
 mailchecker = "6.0.21"
 hickory-resolver = "0.26.1"
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+hex = { version = "0.4.3", features = ["serde"] }
+sha2 = "0.11.0"
+jsonwebtoken = "11.0.0"
+env = "1.0.1"

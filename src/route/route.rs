@@ -1,5 +1,5 @@
 use crate::handlers::user::{
-    create_user, delete_data_user, get_all_user, get_user_by_id, login_user,
+    create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
 };
 use crate::state::AppState;
 use axum::{
@@ -15,6 +15,8 @@ pub fn auth_user() -> Router<AppState> {
     Router::new()
         .route("/register", post(create_user))
         .route("/login", post(login_user))
+        .route("/refresh", post(refresh_token))
+        .route("/logout", post(hello))
 }
 
 pub fn route_user() -> Router<AppState> {
@@ -31,7 +33,7 @@ pub fn route_user() -> Router<AppState> {
 
 pub async fn create_route(state: AppState) -> Router {
     Router::new()
-        .nest("/api/v1/users", route_user())
         .nest("/api/v1/auth", auth_user())
+        .nest("/api/v1/users", route_user())
         .with_state(state)
 }

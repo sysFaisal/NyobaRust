@@ -48,3 +48,6 @@ pub async fn validate_email(dns: &TokioResolver, email: &str) -> bool {
         Err(_) => false,
     }
 }
+
+
+

@@ -8,4 +8,8 @@ pub struct UserProfile {
     pub email: Option<String>,
     pub created_at: DateTime<Utc>,
 }
-
+#[derive(Serialize)]
+pub struct LoginResponse {
+    pub access_token: String,
+    pub token_type: String,
+}
