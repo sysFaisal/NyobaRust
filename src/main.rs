@@ -1,25 +1,36 @@
+use crate::env::{get_database_url, init};
 use crate::route::route::create_route;
-use ::dotenvy::dotenv;
-use ::std::env;
 use hickory_resolver::TokioResolver;
+use jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER;
 use sqlx::PgPool;
+use tracing_subscriber::EnvFilter;
 
+mod c_auth;
 mod config;
 mod dto;
+mod env;
 mod error;
 mod handlers;
 mod route;
 mod service;
 mod state;
-mod c_auth;
 
 use state::AppState;
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    init().expect("Application environment validation failed");
 
-    let database_url = env::var("DATABASE_URL").expect("Database Url Not Found");
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("info"))
+        .with_target(false)
+        .init();
+
+    if let Err(provider) = DEFAULT_PROVIDER.install_default() {
+        eprintln!("JWT crypto provider already installed: {:?}", provider);
+    }
+
+    let database_url = get_database_url().expect("DATABASE_URL is not available");
     let pool = config::database::connect_db(database_url.as_str())
         .await
         .unwrap();

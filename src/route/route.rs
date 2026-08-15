@@ -1,7 +1,9 @@
 use crate::handlers::user::{
     create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
 };
+use crate::service::service_user::auth_middleware;
 use crate::state::AppState;
+use axum::middleware;
 use axum::{
     Router,
     routing::{get, post},
@@ -16,19 +18,18 @@ pub fn auth_user() -> Router<AppState> {
         .route("/register", post(create_user))
         .route("/login", post(login_user))
         .route("/refresh", post(refresh_token))
-        .route("/logout", post(hello))
+}
+
+pub fn route_user_protected() -> Router<AppState> {
+    Router::new()
+        .route("/{id}", get(get_user_by_id).delete(delete_data_user))
+        .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn route_user() -> Router<AppState> {
     Router::new()
-        .route("/", get(get_all_user).post(create_user))
-        .route(
-            "/{id}",
-            get(get_user_by_id)
-                .put(hello)
-                .patch(hello)
-                .delete(delete_data_user),
-        )
+        .route("/", get(get_all_user))
+        .merge(route_user_protected())
 }
 
 pub async fn create_route(state: AppState) -> Router {

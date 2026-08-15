@@ -1,19 +1,22 @@
-use chrono::{DateTime, Utc};
-use hex::encode;
-use hickory_resolver::TokioResolver;
-use sqlx::PgPool;
-use time::OffsetDateTime;
-use uuid::Uuid;
-use validator::Validate;
-
 use crate::c_auth::refresh_token::{
-    RefreshToken, generate_access_token, generate_refresh_token, hash_token_sha256,
+    AccesClaims, RefreshToken, generate_access_token, generate_refresh_token, hash_token_sha256,
 };
 use crate::dto::request::request_user::{CreateUser, LoginUser};
 use crate::dto::response::response_user::UserProfile;
+use crate::env::get_jwt_key;
 use crate::error::error::AppError;
-use crate::handlers::user;
 use crate::service::validation::{hash_password, validate_email, verify_password};
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::Response;
+use chrono::{DateTime, Utc};
+use hickory_resolver::TokioResolver;
+use jsonwebtoken::{DecodingKey, EncodingKey, decode};
+use sqlx::PgPool;
+use time::OffsetDateTime;
+use tracing::{error, info, warn};
+use uuid::Uuid;
+use validator::Validate;
 
 pub async fn svc_get_all_user(pool: &PgPool) -> Result<Vec<UserProfile>, AppError> {
     let users = sqlx::query_as!(
@@ -206,7 +209,10 @@ pub async fn svc_refresh_token(
     family_id: &str,
     incoming_token: &str,
 ) -> Result<(String, String), AppError> {
-    let family_uuid = Uuid::parse_str(family_id).map_err(|_| AppError::Unauthorized)?;
+    let family_uuid = Uuid::parse_str(family_id).map_err(|_| {
+        warn!(family_id = %family_id, "invalid family id sent during refresh");
+        AppError::Unauthorized
+    })?;
     let incoming_hash = hex::encode(hash_token_sha256(incoming_token.as_bytes()));
 
     let mut transaction = pool.begin().await?;
@@ -220,10 +226,18 @@ pub async fn svc_refresh_token(
         family_uuid
     )
     .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(AppError::Unauthorized)?;
+    .await?;
+
+    let record = match record {
+        Some(value) => value,
+        None => {
+            warn!(family_id = %family_uuid, "refresh token family not found during refresh");
+            return Err(AppError::Unauthorized);
+        }
+    };
 
     if record.token_hash != incoming_hash {
+        warn!(family_id = %family_uuid, stored_hash = %record.token_hash, incoming_hash = %incoming_hash, "refresh token reuse detected, deleting token family");
         sqlx::query!(
             r#"DELETE FROM refresh_token WHERE family_id = $1"#,
             family_uuid
@@ -236,6 +250,7 @@ pub async fn svc_refresh_token(
     }
 
     if record.expire_at < Utc::now() {
+        warn!(family_id = %family_uuid, expire_at = ?record.expire_at, "refresh token expired, deleting token family");
         sqlx::query!(
             r#"DELETE FROM refresh_token WHERE family_id = $1"#,
             family_uuid
@@ -247,12 +262,14 @@ pub async fn svc_refresh_token(
         return Err(AppError::Unauthorized);
     }
 
+    info!(family_id = %family_uuid, user_id = %record.user_id, "refresh token validation successful, starting rotation");
+
     let new_access_token = generate_access_token(record.user_id)?;
     let new_refresh_token = generate_refresh_token();
     let new_cookie_value = format!("{}.{}", family_uuid, new_refresh_token.token);
     let new_expire_at = Utc::now() + chrono::Duration::days(7);
 
-    sqlx::query!(
+    let update_result = sqlx::query!(
         r#"
         UPDATE refresh_token
         SET token_hash = $1,
@@ -264,9 +281,57 @@ pub async fn svc_refresh_token(
         family_uuid
     )
     .execute(&mut *transaction)
-    .await?;
+    .await;
+
+    match update_result {
+        Ok(_) => {
+            info!(family_id = %family_uuid, new_expire_at = ?new_expire_at, "refresh token rotated and database updated");
+        }
+        Err(err) => {
+            error!(family_id = %family_uuid, error = ?err, "failed to rotate refresh token in database");
+            return Err(err.into());
+        }
+    }
 
     transaction.commit().await?;
 
     Ok((new_access_token, new_cookie_value))
+}
+
+pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {
+    let auth = match req.headers().get(axum::http::header::AUTHORIZATION) {
+        Some(val) => val,
+        None => return Err(AppError::Unauthorized),
+    };
+
+    let auth_str = match auth.to_str() {
+        Ok(token) => token,
+        Err(e) => {
+            return Err(AppError::InternalServerError(Some(
+                "Failed Parse JWT to &Str".to_string(),
+            )));
+        }
+    };
+
+    let jwt = match auth_str.strip_prefix("Bearer ") {
+        Some(val) => val,
+        None => return Err(AppError::BadRequest(None)),
+    };
+
+    let secret = match get_jwt_key() {
+        Ok(val) => val,
+        Err(e) => return Err(AppError::InternalServerError(Some("e".to_string()))),
+    };
+
+    let claims = match decode::<AccesClaims>(
+        jwt,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &jsonwebtoken::Validation::default(),
+    ) {
+        Ok(val) => val.claims,
+        Err(_) => return Err(AppError::Unauthorized)
+    };
+
+    req.extensions_mut().insert(claims);
+    Ok(next.run(req).await)
 }
