@@ -19,5 +19,5 @@ pub struct LoginResponse {
 pub struct Brand {
     pub id: Uuid,
     pub name: String,
-    pub total_parfume: i32,
+    pub total_parfume: Option<i32>,
 }

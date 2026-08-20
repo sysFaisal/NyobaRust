@@ -295,7 +295,7 @@ pub async fn svc_refresh_token(
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {
     let auth = match req.headers().get(axum::http::header::AUTHORIZATION) {
         Some(val) => val,
-        None => return Err(AppError::Unauthorized),
+        None => return Err(AppError::BadRequest(Some("Test".to_string()))),
     };
 
     let auth_str = match auth.to_str() {
@@ -323,7 +323,7 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
         &jsonwebtoken::Validation::default(),
     ) {
         Ok(val) => val.claims,
-        Err(_) => return Err(AppError::Unauthorized),
+        Err(_) => return Err(AppError::BadRequest(Some("dwdw".to_string()))),
     };
 
     req.extensions_mut().insert(claims);

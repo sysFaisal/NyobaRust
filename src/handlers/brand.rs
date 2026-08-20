@@ -5,8 +5,9 @@ use axum::{Extension, Json};
 use crate::c_auth::refresh_token::AccesClaims;
 use crate::dto::ApiResponse;
 use crate::dto::request::request_user::CreateBrands;
+use crate::dto::response::response_user::Brand;
 use crate::error::error::AppError;
-use crate::service::brands_svc::svc_create_brands;
+use crate::service::brands_svc::{svc_create_brands, svc_get_all_brands};
 use crate::state::AppState;
 
 pub async fn create_brands(
@@ -25,6 +26,15 @@ pub async fn create_brands(
     ))
 }
 
+pub async fn get_all_brands(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+) -> Result<(StatusCode, Json<ApiResponse<Vec<Brand>>>), AppError>  {
+    let res = svc_get_all_brands(&state.db, &access).await?;
+
+    Ok((StatusCode::OK, Json(ApiResponse { data: res, message: Some("Succes".to_string()) })))
+
+}
 /*
 pub async fn get_all_brands (State(state): State<AppState>) -> Result<(StatusCode, Json<Vec<Brand>>), AppError> {
     let = parfume_svc::svc_get_all_brands().await?;

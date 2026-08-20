@@ -1,7 +1,9 @@
-use crate::handlers::brand::create_brands;
+use crate::handlers::brand::{create_brands, get_all_brands};
+use crate::handlers::parfume::create_parfum;
 use crate::handlers::user::{
     create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
 };
+use crate::service::brands_svc::svc_get_all_brands;
 use crate::service::service_user::auth_middleware;
 use crate::state::AppState;
 use axum::middleware;
@@ -39,14 +41,14 @@ pub fn route_user() -> Router<AppState> {
 
 pub fn router_brands() -> Router<AppState> {
     Router::new()
-        .route("/", get(hello).post(create_brands))
+        .route("/", get(get_all_brands).post(create_brands))
         .route("/{id}", get(hello))
         .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
-        .route("/", post(create_parfume))
+        .route("/", post(create_parfum))
         .layer(middleware::from_fn(auth_middleware))
 }
 
@@ -55,5 +57,6 @@ pub async fn create_route(state: AppState) -> Router {
         .nest("/api/v1/auth", auth_user())
         .nest("/api/v1/users", route_user())
         .nest("/api/v1/brands", router_brands())
+        .nest("/api/v1/parfume", router_parfume())
         .with_state(state)
 }

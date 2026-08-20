@@ -109,7 +109,7 @@ pub async fn login_user(
 
     let cookie = Cookie::build(("refresh_token", refresh_cookie_value))
         .http_only(true)
-        .secure(true)
+        .secure(false)
         .same_site(SameSite::Strict)
         .path("/")
         .expires(Expiration::DateTime(expire_at))
@@ -135,7 +135,9 @@ pub async fn refresh_token(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<(StatusCode, CookieJar, Json<ApiResponse<LoginResponse>>), AppError> {
-    let cookie = jar.get("refresh_token").ok_or(AppError::Unauthorized)?;
+    let cookie = jar
+        .get("refresh_token")
+        .ok_or(AppError::BadRequest(Some("1dwdw".to_string())))?;
     let cookie_value = cookie.value();
 
     let (family_id, incoming_token) = cookie_value.split_once('.').ok_or(AppError::Unauthorized)?;
@@ -145,7 +147,7 @@ pub async fn refresh_token(
 
     let new_cookie = Cookie::build(("refresh_token", new_cookie_value))
         .http_only(true)
-        .secure(true)
+        .secure(false)
         .same_site(SameSite::Strict)
         .path("/")
         .build();

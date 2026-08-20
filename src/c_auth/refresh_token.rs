@@ -83,7 +83,7 @@ pub fn generate_refresh_token() -> RefreshToken {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
-    let token_hash = hex::encode(hash_token_sha256(&bytes));
+    let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
     let expire_at = Utc::now() + Duration::days(7);
 
     RefreshToken {

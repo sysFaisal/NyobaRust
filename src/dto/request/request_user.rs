@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use serde_email::Email;
+use uuid::Uuid;
 use validator::Validate;
+use validator::ValidationError;
 
 #[derive(Deserialize, Validate)]
 pub struct CreateUser {
@@ -23,4 +25,13 @@ pub struct LoginUser {
 pub struct CreateBrands {
     #[validate(length(min = 3))]
     pub name_brands: String,
+}
+
+#[derive(Deserialize, Validate)]
+pub struct Parfume {
+    pub brands_id: Uuid,
+    #[validate(length(min = 3))]
+    pub name: String,
+    pub concrentration: Option<String>,
+    pub description: Option<String>,
 }
