@@ -1,3 +1,4 @@
+use crate::handlers::brand::create_brands;
 use crate::handlers::user::{
     create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
 };
@@ -22,19 +23,37 @@ pub fn auth_user() -> Router<AppState> {
 
 pub fn route_user_protected() -> Router<AppState> {
     Router::new()
-        .route("/{id}", get(get_user_by_id).delete(delete_data_user))
+        .route(
+            "/profile/{id}",
+            get(get_user_by_id).delete(delete_data_user),
+        )
         .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn route_user() -> Router<AppState> {
     Router::new()
         .route("/", get(get_all_user))
-        .merge(route_user_protected())
+        .route("/{id}", get(get_user_by_id).delete(delete_data_user))
+        .layer(middleware::from_fn(auth_middleware))
+}
+
+pub fn router_brands() -> Router<AppState> {
+    Router::new()
+        .route("/", get(hello).post(create_brands))
+        .route("/{id}", get(hello))
+        .layer(middleware::from_fn(auth_middleware))
+}
+
+pub fn router_parfume() -> Router<AppState> {
+    Router::new()
+        .route("/", post(create_parfume))
+        .layer(middleware::from_fn(auth_middleware))
 }
 
 pub async fn create_route(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1/auth", auth_user())
         .nest("/api/v1/users", route_user())
+        .nest("/api/v1/brands", router_brands())
         .with_state(state)
 }

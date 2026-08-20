@@ -18,3 +18,9 @@ pub struct LoginUser {
     #[validate(length(min = 8))]
     pub password: String,
 }
+
+#[derive(Deserialize, Validate)]
+pub struct CreateBrands {
+    #[validate(length(min = 3))]
+    pub name_brands: String,
+}

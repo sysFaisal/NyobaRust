@@ -1,3 +1,4 @@
+use crate::c_auth::refresh_token::RoleModel;
 use crate::c_auth::refresh_token::{
     AccesClaims, RefreshToken, generate_access_token, generate_refresh_token, hash_token_sha256,
 };
@@ -51,20 +52,20 @@ pub async fn svc_get_user_by_id(
 pub async fn get_id_pw_by_username(
     pool: &PgPool,
     username: &String,
-) -> Result<(Uuid, String), AppError> {
+) -> Result<(Uuid, String, RoleModel), AppError> {
     if username.trim().is_empty() {
         return Err(AppError::BadRequest(None));
     }
 
     let user = sqlx::query!(
-        r#"SELECT id, password_hash FROM users WHERE username = $1"#,
+        r#"SELECT id, password_hash, role as "role: RoleModel" FROM users WHERE username = $1"#,
         username
     )
     .fetch_optional(pool)
     .await?
-    .ok_or(AppError::Unauthorized)?;
+    .ok_or(AppError::NotFound)?;
 
-    Ok((user.id, user.password_hash))
+    Ok((user.id, user.password_hash, user.role))
 }
 pub async fn svc_login_user(
     pool: &PgPool,
@@ -74,7 +75,7 @@ pub async fn svc_login_user(
         return Err(AppError::BadRequest(None));
     }
 
-    let (user_id, hashed_password) = get_id_pw_by_username(pool, &payload.username).await?;
+    let (user_id, hashed_password, role) = get_id_pw_by_username(pool, &payload.username).await?;
 
     match verify_password(&payload.password, &hashed_password) {
         Ok(true) => {}
@@ -110,12 +111,12 @@ pub async fn svc_login_user(
         user_id,
         token.token_hash,
         token.expire_at,
-        family_id
+        family_id,
     )
     .execute(pool)
     .await?;
 
-    let jwt = generate_access_token(user_id)?;
+    let jwt = generate_access_token(user_id, &role)?;
 
     Ok((cookie_value, chrono_to_time, jwt))
 }
@@ -147,17 +148,19 @@ pub async fn svc_create_user(
         Err(_) => return Err(AppError::BadRequest(None)),
     };
 
+    let seller = RoleModel::Seller;
     match &payload.email {
         Some(email) => {
             let respon = sqlx::query_as!(
                 UserProfile,
                 r#"
-                INSERT INTO users (username, email, password_hash)
-                VALUES ($1, $2, $3)
+                INSERT INTO users (username, email, password_hash, role )
+                VALUES ($1, $2, $3, $4)
                 RETURNING id, username, email, created_at"#,
                 payload.username,
                 email.as_str(),
                 password_hash,
+                RoleModel::Seller as RoleModel
             )
             .fetch_one(pool)
             .await?;
@@ -167,11 +170,12 @@ pub async fn svc_create_user(
         None => {
             let respon = sqlx::query_as!(
                 UserProfile,
-                r#"INSERT INTO users (username, password_hash)
-                VALUES ($1, $2)
+                r#"INSERT INTO users (username, password_hash, role)
+                VALUES ($1, $2, $3)
                 RETURNING id, username, email, created_at"#,
                 payload.username,
                 password_hash,
+                RoleModel::Seller as RoleModel
             )
             .fetch_one(pool)
             .await?;
@@ -181,19 +185,6 @@ pub async fn svc_create_user(
     }
 }
 
-//fetch one untuk mengambil data sekali T
-//fetch all untuk mengambil data banyak Vec<T>
-//fetch optional untuk mengambil data dengan Option<T>
-//execute untuk query tanpa mengambil row QueryResult
-
-//row kosong
-//fetch one masuk ke sqlx::error::rownotound
-//fetch all jadi ok(vec!<t>)
-//fetch option jadi ok(option => (none))
-//execute jadi queryresult diceknya pakai Ok(queryresult)=>affected_row)
-
-//query hasilnya tidak dipetakan ke struct
-//query_as dipetakan ke struct
 pub async fn svc_delete_user(pool: &PgPool, id: Uuid) -> Result<&'static str, AppError> {
     let result = sqlx::query!("DELETE FROM users WHERE id = $1", id)
         .execute(pool)
@@ -219,9 +210,10 @@ pub async fn svc_refresh_token(
 
     let record = sqlx::query!(
         r#"
-        SELECT user_id, token_hash, expire_at
-        FROM refresh_token
-        WHERE family_id = $1
+        SELECT rt.user_id, rt.token_hash, rt.expire_at, u.role AS "role: RoleModel"
+        FROM refresh_token rt
+        JOIN users u ON u.id = rt.user_id
+        WHERE rt.family_id = $1
         "#,
         family_uuid
     )
@@ -262,9 +254,11 @@ pub async fn svc_refresh_token(
         return Err(AppError::Unauthorized);
     }
 
+    let role = record.role;
+
     info!(family_id = %family_uuid, user_id = %record.user_id, "refresh token validation successful, starting rotation");
 
-    let new_access_token = generate_access_token(record.user_id)?;
+    let new_access_token = generate_access_token(record.user_id, &role)?;
     let new_refresh_token = generate_refresh_token();
     let new_cookie_value = format!("{}.{}", family_uuid, new_refresh_token.token);
     let new_expire_at = Utc::now() + chrono::Duration::days(7);
@@ -329,7 +323,7 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
         &jsonwebtoken::Validation::default(),
     ) {
         Ok(val) => val.claims,
-        Err(_) => return Err(AppError::Unauthorized)
+        Err(_) => return Err(AppError::Unauthorized),
     };
 
     req.extensions_mut().insert(claims);

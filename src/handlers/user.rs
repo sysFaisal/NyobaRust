@@ -1,13 +1,14 @@
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, Expiration, SameSite};
 
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::c_auth::refresh_token::{AccesClaims, RoleModel};
 use crate::dto::ApiResponse;
 use crate::dto::request::request_user::{CreateUser, LoginUser};
 use crate::dto::response::response_user::{LoginResponse, UserProfile};
@@ -73,7 +74,21 @@ pub async fn create_user(
 pub async fn delete_data_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Extension(claims): Extension<AccesClaims>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+    if claims.role != RoleModel::Dev as RoleModel {
+        return Err(AppError::Forbidden);
+    }
+
+    let my_uuid = match Uuid::parse_str(&claims.sub) {
+        Ok(val) => val,
+        Err(_) => return Err(AppError::BadRequest(None)),
+    };
+
+    if my_uuid == id {
+        return Err(AppError::Forbidden);
+    }
+
     let delete_user_response = service_user::svc_delete_user(&state.db, id).await?;
 
     Ok((
@@ -123,9 +138,7 @@ pub async fn refresh_token(
     let cookie = jar.get("refresh_token").ok_or(AppError::Unauthorized)?;
     let cookie_value = cookie.value();
 
-    let (family_id, incoming_token) = cookie_value
-        .split_once('.')
-        .ok_or(AppError::Unauthorized)?;
+    let (family_id, incoming_token) = cookie_value.split_once('.').ok_or(AppError::Unauthorized)?;
 
     let (new_access_token, new_cookie_value) =
         svc_refresh_token(&state.db, family_id, incoming_token).await?;

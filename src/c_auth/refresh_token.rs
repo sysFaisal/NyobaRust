@@ -8,7 +8,6 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use time::format_description::well_known::iso8601::FormattedComponents::Date;
 use tracing::error;
 use uuid::Uuid;
 
@@ -22,9 +21,17 @@ pub struct RefreshToken {
     pub expire_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Serialize, Deserialize)]
+#[sqlx(type_name = "role.model", rename_all = "lowercase")]
+pub enum RoleModel {
+    Dev,
+    Seller,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AccesClaims {
     pub sub: String, //Uuid
+    pub role: RoleModel,  //role
     pub iat: i64,    //created_token
     pub exp: i64,    //expire_token
 }
@@ -45,10 +52,11 @@ fn get_jwt_secret() -> Result<String, AppError> {
     Ok(secret)
 }
 
-pub fn generate_access_token(user_id: Uuid) -> Result<String, AppError> {
+pub fn generate_access_token(user_id: Uuid, role: &RoleModel) -> Result<String, AppError> {
     let now = Utc::now();
     let claims = AccesClaims {
         sub: user_id.to_string(),
+        role: role.clone(),
         iat: now.timestamp(),
         exp: (now + Duration::minutes(5)).timestamp(), //5 menit
     };
