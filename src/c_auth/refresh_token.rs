@@ -39,14 +39,15 @@ pub struct AccesClaims {
 fn get_jwt_secret() -> Result<String, AppError> {
     let secret = get_jwt_key().map_err(|err| {
         error!(error = %err, "JWT_KEY is missing from environment or .env");
-        AppError::InternalServerError(Some("JWT_KEY environment variable is missing".to_string()))
+        AppError::InternalServerError(None, Some("JWT_KEY environment variable is missing".to_string()))
     })?;
 
     if secret.trim().is_empty() {
         error!("JWT_KEY is empty");
-        return Err(AppError::InternalServerError(Some(
-            "JWT_KEY environment variable is empty".to_string(),
-        )));
+        return Err(AppError::InternalServerError(
+            None,
+            Some("JWT_KEY environment variable is empty".to_string()),
+        ));
     }
 
     Ok(secret)
@@ -69,7 +70,7 @@ pub fn generate_access_token(user_id: Uuid, role: &RoleModel) -> Result<String, 
     )
     .map_err(|err| {
         error!(error = ?err, "failed to encode JWT access token");
-        AppError::InternalServerError(Some("failed to encode JWT access token".to_string()))
+        AppError::InternalServerError(None, Some("failed to encode JWT access token".to_string()))
     })?;
 
     Ok(token)

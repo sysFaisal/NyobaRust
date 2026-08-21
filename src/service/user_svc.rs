@@ -1,20 +1,19 @@
 use crate::c_auth::refresh_token::RoleModel;
 use crate::c_auth::refresh_token::{
-    AccesClaims, RefreshToken, generate_access_token, generate_refresh_token, hash_token_sha256,
+    AccesClaims, generate_access_token, generate_refresh_token, hash_token_sha256,
 };
-use crate::dto::request::request_user::{CreateUser, LoginUser, UpdateUser};
-use crate::dto::response::response_user::UserProfile;
+use crate::dto::request::user_req::{CreateUser, UpdateUser};
+use crate::dto::response::user_res::UserProfile;
 use crate::env::get_jwt_key;
 use crate::error::error::AppError;
-use crate::service::validation::{hash_password, validate_email, verify_password};
+use crate::service::validation::{hash_password, validate_email};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use hickory_resolver::TokioResolver;
-use jsonwebtoken::{DecodingKey, EncodingKey, decode};
+use jsonwebtoken::{DecodingKey, decode};
 use sqlx::PgPool;
-use time::OffsetDateTime;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
@@ -22,7 +21,14 @@ use validator::Validate;
 pub async fn svc_get_all_user(pool: &PgPool) -> Result<Vec<UserProfile>, AppError> {
     let users = sqlx::query_as!(
         UserProfile,
-        "SELECT id, username, email, created_at FROM users"
+        r#"
+            SELECT
+                id,
+                username,
+                email,
+                created_at
+            FROM users
+        "#
     )
     .fetch_all(pool)
     .await?;
@@ -49,78 +55,6 @@ pub async fn svc_get_user_by_id(
     Ok(users)
 }
 
-pub async fn get_id_pw_by_username(
-    pool: &PgPool,
-    username: &String,
-) -> Result<(Uuid, String, RoleModel), AppError> {
-    if username.trim().is_empty() {
-        return Err(AppError::BadRequest(None));
-    }
-
-    let user = sqlx::query!(
-        r#"SELECT id, password_hash, role as "role: RoleModel" FROM users WHERE username = $1"#,
-        username
-    )
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
-
-    Ok((user.id, user.password_hash, user.role))
-}
-pub async fn svc_login_user(
-    pool: &PgPool,
-    payload: &LoginUser,
-) -> Result<(String, OffsetDateTime, String), AppError> {
-    if payload.username.trim().is_empty() || payload.password.trim().is_empty() {
-        return Err(AppError::BadRequest(None));
-    }
-
-    let (user_id, hashed_password, role) = get_id_pw_by_username(pool, &payload.username).await?;
-
-    match verify_password(&payload.password, &hashed_password) {
-        Ok(true) => {}
-        Ok(false) => return Err(AppError::Unauthorized),
-        Err(_) => return Err(AppError::InternalServerError(None)),
-    }
-
-    let family_id = Uuid::new_v4();
-    let token = generate_refresh_token();
-
-    let chrono_to_time = match OffsetDateTime::from_unix_timestamp(token.expire_at.timestamp()) {
-        Ok(time) => time,
-        Err(_) => return Err(AppError::InternalServerError(None)),
-    };
-
-    let cookie_value = format!("{}.{}", family_id, token.token);
-
-    sqlx::query!(
-        r#"
-    INSERT INTO refresh_token (
-        user_id,
-        token_hash,
-        expire_at,
-        family_id
-    )
-    VALUES (
-        $1,
-        $2,
-        $3,
-        $4
-    )
-    "#,
-        user_id,
-        token.token_hash,
-        token.expire_at,
-        family_id,
-    )
-    .execute(pool)
-    .await?;
-
-    let jwt = generate_access_token(user_id, &role)?;
-
-    Ok((cookie_value, chrono_to_time, jwt))
-}
-
 pub async fn svc_create_user(
     dns: &TokioResolver,
     pool: &PgPool,
@@ -129,23 +63,23 @@ pub async fn svc_create_user(
     payload.username = payload.username.trim().to_string();
 
     if payload.password.trim().is_empty() {
-        return Err(AppError::BadRequest(None));
+        return Err(AppError::BadRequest(None, Some("svc_create_user: password kosong".to_string())));
     }
 
     match payload.validate() {
         Ok(_) => {}
-        Err(e) => return Err(AppError::BadRequest(Some(e.to_string()))),
+        Err(e) => return Err(AppError::BadRequest(Some(e.to_string()), Some("svc_create_user: validasi input gagal".to_string()))),
     };
 
     if let Some(email) = &payload.email {
         if !validate_email(dns, email.as_str()).await {
-            return Err(AppError::BadRequest(None));
+            return Err(AppError::BadRequest(None, Some("svc_create_user: email tidak valid".to_string())));
         }
     }
 
     let password_hash = match hash_password(&payload.password.as_str()) {
         Ok(hash) => hash,
-        Err(_) => return Err(AppError::BadRequest(None)),
+        Err(_) => return Err(AppError::BadRequest(None, Some("svc_create_user: hash password gagal".to_string()))),
     };
 
     let seller = RoleModel::Seller;
@@ -192,12 +126,15 @@ pub async fn svc_update_user(
     payload: &UpdateUser,
 ) -> Result<UserProfile, AppError> {
     if payload.username.is_none() && payload.email.is_none() && payload.password.is_none() {
-        return Err(AppError::BadRequest(Some("No field to update".to_string())));
+        return Err(AppError::BadRequest(
+            Some("No field to update".to_string()),
+            Some("svc_update_user: tidak ada field yang dikirim client".to_string()),
+        ));
     }
 
     payload
         .validate()
-        .map_err(|e| AppError::BadRequest(Some(e.to_string())))?;
+        .map_err(|e| AppError::BadRequest(Some(e.to_string()), Some("svc_update_user: validasi input gagal".to_string())))?;
 
     let current = sqlx::query!(
         r#"SELECT username, email, password_hash FROM users WHERE id = $1"#,
@@ -205,13 +142,13 @@ pub async fn svc_update_user(
     )
     .fetch_optional(pool)
     .await?
-    .ok_or(AppError::NotFound)?;
+    .ok_or(AppError::NotFound(None, Some("svc_update_user: user tidak ditemukan".to_string())))?;
 
     let username = match &payload.username {
         Some(username) => {
             let username = username.trim().to_string();
             if username.is_empty() {
-                return Err(AppError::BadRequest(None));
+                return Err(AppError::BadRequest(None, Some("svc_update_user: username kosong".to_string())));
             }
             username
         }
@@ -221,7 +158,7 @@ pub async fn svc_update_user(
     let email = match &payload.email {
         Some(Some(email)) => {
             if !validate_email(dns, email.as_str()).await {
-                return Err(AppError::BadRequest(None));
+                return Err(AppError::BadRequest(None, Some("svc_update_user: email tidak valid".to_string())));
             }
             Some(email.as_str().to_string())
         }
@@ -233,9 +170,9 @@ pub async fn svc_update_user(
         Some(password) => {
             let password = password.trim().to_string();
             if password.is_empty() {
-                return Err(AppError::BadRequest(None));
+                return Err(AppError::BadRequest(None, Some("svc_update_user: password kosong".to_string())));
             }
-            hash_password(&password).map_err(|_| AppError::BadRequest(None))?
+            hash_password(&password).map_err(|_| AppError::BadRequest(None, Some("svc_update_user: hash password gagal".to_string())))?
         }
         None => current.password_hash,
     };
@@ -256,7 +193,7 @@ pub async fn svc_update_user(
     .await?;
 
     Ok(UserProfile {
-        id: row.id.to_string(),
+        id: row.id,
         username: row.username,
         email: row.email,
         created_at: row.created_at,
@@ -268,7 +205,7 @@ pub async fn svc_delete_user(pool: &PgPool, id: Uuid) -> Result<&'static str, Ap
         .execute(pool)
         .await?;
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound);
+        return Err(AppError::NotFound(None, Some("svc_delete_user: user tidak ditemukan".to_string())));
     }
     Ok("Success Delete")
 }
@@ -280,7 +217,7 @@ pub async fn svc_refresh_token(
 ) -> Result<(String, String), AppError> {
     let family_uuid = Uuid::parse_str(family_id).map_err(|_| {
         warn!(family_id = %family_id, "invalid family id sent during refresh");
-        AppError::Unauthorized
+        AppError::Unauthorized(None, Some("svc_refresh_token: family_id tidak valid".to_string()))
     })?;
     let incoming_hash = hex::encode(hash_token_sha256(incoming_token.as_bytes()));
 
@@ -302,7 +239,7 @@ pub async fn svc_refresh_token(
         Some(value) => value,
         None => {
             warn!(family_id = %family_uuid, "refresh token family not found during refresh");
-            return Err(AppError::Unauthorized);
+            return Err(AppError::Unauthorized(None, Some("svc_refresh_token: token family tidak ditemukan".to_string())));
         }
     };
 
@@ -316,7 +253,7 @@ pub async fn svc_refresh_token(
         .await?;
 
         transaction.commit().await?;
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None, Some("svc_refresh_token: refresh token reuse terdeteksi".to_string())));
     }
 
     if record.expire_at < Utc::now() {
@@ -329,7 +266,7 @@ pub async fn svc_refresh_token(
         .await?;
 
         transaction.commit().await?;
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None, Some("svc_refresh_token: refresh token sudah expired".to_string())));
     }
 
     let role = record.role;
@@ -373,26 +310,30 @@ pub async fn svc_refresh_token(
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {
     let auth = match req.headers().get(axum::http::header::AUTHORIZATION) {
         Some(val) => val,
-        None => return Err(AppError::BadRequest(Some("Test".to_string()))),
+        None => return Err(AppError::BadRequest(
+            Some("Test".to_string()),
+            Some("auth_middleware: header Authorization tidak ada".to_string()),
+        )),
     };
 
     let auth_str = match auth.to_str() {
         Ok(token) => token,
         Err(e) => {
-            return Err(AppError::InternalServerError(Some(
-                "Failed Parse JWT to &Str".to_string(),
-            )));
+            return Err(AppError::InternalServerError(
+                None,
+                Some("auth_middleware: gagal parse header Authorization ke &str".to_string()),
+            ));
         }
     };
 
     let jwt = match auth_str.strip_prefix("Bearer ") {
         Some(val) => val,
-        None => return Err(AppError::BadRequest(None)),
+        None => return Err(AppError::BadRequest(None, Some("auth_middleware: header tidak mengandung Bearer token".to_string()))),
     };
 
     let secret = match get_jwt_key() {
         Ok(val) => val,
-        Err(e) => return Err(AppError::InternalServerError(Some("e".to_string()))),
+        Err(e) => return Err(AppError::InternalServerError(None, Some(e.to_string()))),
     };
 
     let claims = match decode::<AccesClaims>(
@@ -401,7 +342,10 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
         &jsonwebtoken::Validation::default(),
     ) {
         Ok(val) => val.claims,
-        Err(_) => return Err(AppError::BadRequest(Some("dwdw".to_string()))),
+        Err(_) => return Err(AppError::BadRequest(
+            Some("dwdw".to_string()),
+            Some("auth_middleware: gagal decode JWT access token".to_string()),
+        )),
     };
 
     req.extensions_mut().insert(claims);

@@ -3,7 +3,9 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims, dto::request::request_user::Parfume, error::error::AppError,
+    c_auth::refresh_token::AccesClaims,
+    dto::request::parfume_req::CreateParfume,
+    error::error::AppError,
 };
 
 pub fn validate_string(value: &str, trimmed: bool, min_length: usize) -> bool {
@@ -14,17 +16,17 @@ pub fn validate_string(value: &str, trimmed: bool, min_length: usize) -> bool {
 
 pub async fn svc_create_parfume(
     pool: &PgPool,
-    req: &Parfume,
+    req: &CreateParfume,
     access: &AccesClaims,
 ) -> Result<String, AppError> {
     if !validate_string(&req.name, true, 3) {
-        return Err(AppError::BadRequest(None));
+        return Err(AppError::BadRequest(None, Some("svc_create_parfume: nama parfume kurang dari 3 karakter".to_string())));
     }
 
     let concentration = match &req.concrentration {
         Some(val) => {
             if !validate_string(&val, true, 3) {
-                return Err(AppError::BadRequest(None));
+                return Err(AppError::BadRequest(None, Some("svc_create_parfume: concentration kurang dari 3 karakter".to_string())));
             }
 
             Some(val.trim().to_string())
@@ -36,7 +38,7 @@ pub async fn svc_create_parfume(
     let desc = match &req.description {
         Some(val) => {
             if !validate_string(&val, true, 3) {
-                return Err(AppError::BadRequest(None));
+                return Err(AppError::BadRequest(None, Some("svc_create_parfume: description kurang dari 3 karakter".to_string())));
             }
 
             Some(val.trim().to_string())
@@ -47,7 +49,7 @@ pub async fn svc_create_parfume(
 
     let uuid = match Uuid::parse_str(access.sub.as_str()) {
         Ok(val) => val,
-        Err(_) => return Err(AppError::InternalServerError(None)),
+        Err(_) => return Err(AppError::InternalServerError(None, Some("svc_create_parfume: gagal parse UUID dari claims".to_string()))),
     };
     let result = sqlx::query!(
         r#"
@@ -76,7 +78,7 @@ pub async fn svc_create_parfume(
     .await?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::Forbidden);
+        return Err(AppError::Forbidden(None, Some("svc_create_parfume: brands_id bukan milik user ini".to_string())));
     }
 
     Ok("Parfume created successfully".to_string())
