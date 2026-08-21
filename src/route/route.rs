@@ -1,12 +1,15 @@
+use crate::handlers::batch::create_batch;
 use crate::handlers::brand::{create_brands, get_all_brands};
 use crate::handlers::parfume::create_parfum;
 use crate::handlers::user::{
     create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
+    update_user,
 };
 use crate::service::brands_svc::svc_get_all_brands;
 use crate::service::service_user::auth_middleware;
 use crate::state::AppState;
 use axum::middleware;
+use axum::routing::patch;
 use axum::{
     Router,
     routing::{get, post},
@@ -35,20 +38,28 @@ pub fn route_user_protected() -> Router<AppState> {
 pub fn route_user() -> Router<AppState> {
     Router::new()
         .route("/", get(get_all_user))
-        .route("/{id}", get(get_user_by_id).delete(delete_data_user))
+        .route(
+            "/{id}",
+            get(get_user_by_id)
+                .delete(delete_data_user)
+                .patch(update_user),
+        )
         .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn router_brands() -> Router<AppState> {
     Router::new()
         .route("/", get(get_all_brands).post(create_brands))
-        .route("/{id}", get(hello))
+        .route("/{id}", get(hello).patch(hello))
         .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
         .route("/", post(create_parfum))
+        .route("/{id}", patch(hello))
+        .route("/{id}/batch", get(hello).post(create_batch))
+        .route("/{id}/decant", get(hello).post(create_brands))
         .layer(middleware::from_fn(auth_middleware))
 }
 

@@ -2,7 +2,7 @@ use crate::c_auth::refresh_token::RoleModel;
 use crate::c_auth::refresh_token::{
     AccesClaims, RefreshToken, generate_access_token, generate_refresh_token, hash_token_sha256,
 };
-use crate::dto::request::request_user::{CreateUser, LoginUser};
+use crate::dto::request::request_user::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::response_user::UserProfile;
 use crate::env::get_jwt_key;
 use crate::error::error::AppError;
@@ -183,6 +183,84 @@ pub async fn svc_create_user(
             Ok(respon)
         }
     }
+}
+
+pub async fn svc_update_user(
+    dns: &TokioResolver,
+    pool: &PgPool,
+    id: &Uuid,
+    payload: &UpdateUser,
+) -> Result<UserProfile, AppError> {
+    if payload.username.is_none() && payload.email.is_none() && payload.password.is_none() {
+        return Err(AppError::BadRequest(Some("No field to update".to_string())));
+    }
+
+    payload
+        .validate()
+        .map_err(|e| AppError::BadRequest(Some(e.to_string())))?;
+
+    let current = sqlx::query!(
+        r#"SELECT username, email, password_hash FROM users WHERE id = $1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let username = match &payload.username {
+        Some(username) => {
+            let username = username.trim().to_string();
+            if username.is_empty() {
+                return Err(AppError::BadRequest(None));
+            }
+            username
+        }
+        None => current.username,
+    };
+
+    let email = match &payload.email {
+        Some(Some(email)) => {
+            if !validate_email(dns, email.as_str()).await {
+                return Err(AppError::BadRequest(None));
+            }
+            Some(email.as_str().to_string())
+        }
+        Some(None) => None,
+        None => current.email,
+    };
+
+    let password_hash = match &payload.password {
+        Some(password) => {
+            let password = password.trim().to_string();
+            if password.is_empty() {
+                return Err(AppError::BadRequest(None));
+            }
+            hash_password(&password).map_err(|_| AppError::BadRequest(None))?
+        }
+        None => current.password_hash,
+    };
+
+    let row = sqlx::query!(
+        r#"
+        UPDATE users
+        SET username = $1, email = $2, password_hash = $3
+        WHERE id = $4
+        RETURNING id, username, email, created_at
+        "#,
+        username,
+        email,
+        password_hash,
+        id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(UserProfile {
+        id: row.id.to_string(),
+        username: row.username,
+        email: row.email,
+        created_at: row.created_at,
+    })
 }
 
 pub async fn svc_delete_user(pool: &PgPool, id: Uuid) -> Result<&'static str, AppError> {

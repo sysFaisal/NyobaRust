@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::c_auth::refresh_token::{AccesClaims, RoleModel};
 use crate::dto::ApiResponse;
-use crate::dto::request::request_user::{CreateUser, LoginUser};
+use crate::dto::request::request_user::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::response_user::{LoginResponse, UserProfile};
 use crate::error::error::AppError;
 use crate::service::service_user::{self, svc_refresh_token};
@@ -28,7 +28,12 @@ E	64 MiB	2	1	lebih berat lagi
 
 pub async fn get_all_user(
     State(state): State<AppState>,
+    Extension(claims): Extension<AccesClaims>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<UserProfile>>>), AppError> {
+    if claims.role != RoleModel::Dev {
+        return Err(AppError::Forbidden);
+    };
+
     let users = service_user::svc_get_all_user(&state.db).await?;
 
     Ok((
@@ -96,6 +101,29 @@ pub async fn delete_data_user(
         Json(ApiResponse {
             data: (),
             message: Some(delete_user_response.to_string()),
+        }),
+    ))
+}
+
+pub async fn update_user(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Extension(claims): Extension<AccesClaims>,
+    Json(payload): Json<UpdateUser>,
+) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
+    let my_uuid = Uuid::parse_str(&claims.sub).map_err(|_| AppError::BadRequest(None))?;
+
+    if claims.role != RoleModel::Dev && my_uuid != id {
+        return Err(AppError::Forbidden);
+    }
+
+    let user = service_user::svc_update_user(&state.dns, &state.db, &id, &payload).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: user,
+            message: Some("Success Update".to_string()),
         }),
     ))
 }
