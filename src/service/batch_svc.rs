@@ -31,6 +31,7 @@ pub async fn svc_create_batch(
     pool: &PgPool,
     req: &CreateBatch,
     access: &AccesClaims,
+    id: &Uuid,
 ) -> Result<String, AppError> {
     let uuid = match Uuid::parse_str(access.sub.as_str()) {
         Ok(val) => val,
@@ -58,7 +59,7 @@ pub async fn svc_create_batch(
     WHERE f.id = $1
       AND b.owner_id = $2
     "#,
-        req.parfume_id,
+        id,
         uuid,
         req.quantity_ml,
         req.purchase_price
@@ -122,12 +123,6 @@ pub async fn svc_update_batch(
     access: &AccesClaims,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    if id != &req.batch_id {
-        return Err(AppError::Forbidden(
-            None,
-            Some("svc_update_batch: hanya Dev yang boleh".to_string()),
-        ));
-    };
 
     let uuid = match Uuid::parse_str(access.sub.as_str()) {
         Ok(val) => val,
@@ -153,7 +148,7 @@ pub async fn svc_update_batch(
           AND bf.id = $2
     "#,
         uuid,
-        &req.batch_id
+        id,
     )
     .fetch_one(pool)
     .await?;
@@ -177,7 +172,7 @@ pub async fn svc_update_batch(
         "#,
         quantity_ml,
         purchase_price,
-        &req.batch_id
+        id
     )
     .execute(pool)
     .await?;

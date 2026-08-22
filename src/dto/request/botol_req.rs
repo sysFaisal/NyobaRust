@@ -22,7 +22,6 @@ pub struct CreateBottle {
 
 #[derive(Deserialize, Validate)]
 pub struct UpdateBottle {
-    pub batch_parfume_id: Option<Uuid>,
     pub remaining_ml: Option<BigDecimal>,
     pub status: Option<String>,
 }

@@ -201,12 +201,31 @@ pub async fn svc_update_user(
 }
 
 pub async fn svc_delete_user(pool: &PgPool, id: Uuid) -> Result<&'static str, AppError> {
+    let mut tx = pool.begin().await?;
+
+    let owned_brands = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "count!" FROM brands WHERE owner_id = $1"#,
+        id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if owned_brands > 0 {
+        return Err(AppError::Conflict(
+            Some(format!("user masih memiliki {owned_brands} brand, hapus atau pindahkan brand terlebih dahulu")),
+            Some("svc_delete_user: user masih direferensikan oleh brands".to_string()),
+        ));
+    }
+
     let result = sqlx::query!("DELETE FROM users WHERE id = $1", id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(None, Some("svc_delete_user: user tidak ditemukan".to_string())));
     }
+
+    tx.commit().await?;
     Ok("Success Delete")
 }
 

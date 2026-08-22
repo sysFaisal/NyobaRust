@@ -23,14 +23,7 @@ pub async fn create_batch(
     Path(id): Path<Uuid>,
     Json(req): Json<CreateBatch>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
-    if &id.to_string() != &req.parfume_id.to_string() {
-        return Err(AppError::Forbidden(
-            None,
-            Some("create_batch: hanya Dev yang boleh".to_string()),
-        ));
-    };
-
-    let create = svc_create_batch(&appstate.db, &req, &access).await?;
+    let create = svc_create_batch(&appstate.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::CREATED,

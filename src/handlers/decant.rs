@@ -6,15 +6,9 @@ use axum::{
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
-    dto::{
-        ApiResponse,
-        request::decant_req::CreateDecant,
-        response::decant_res::DecantResponse,
-    },
-    error::error::AppError,
-    service::decant_svc::{svc_create_decant, svc_get_all_decant},
-    state::AppState,
+    c_auth::refresh_token::AccesClaims, dto::{
+        ApiResponse, request::decant_req::{CreateDecant, UpdateDecant}, response::decant_res::DecantResponse,
+    }, error::error::AppError, service::decant_svc::{svc_create_decant, svc_get_all_decant, svc_update_decant}, state::AppState,
 };
 
 pub async fn create_decant(
@@ -23,11 +17,8 @@ pub async fn create_decant(
     Extension(access): Extension<AccesClaims>,
     Json(req): Json<CreateDecant>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
-    if &id.to_string() != &req.parfume_id.to_string() {
-        return Err(AppError::Forbidden(None, Some("create_decant: hanya Dev yang boleh".to_string())));
-    };
 
-    let create = svc_create_decant(&state.db, &req, &access).await?;
+    let create = svc_create_decant(&state.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -50,6 +41,23 @@ pub async fn get_all_decant(
         Json(ApiResponse {
             data: res,
             message: Some("Succes".to_string()),
+        }),
+    ))
+}
+
+pub async fn update_decant(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateDecant>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let res = svc_update_decant(&state.db, &req, &access, &id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: res,
+            message: None,
         }),
     ))
 }

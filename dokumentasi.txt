@@ -1,0 +1,376 @@
+# API Backend — Dokumentasi untuk Frontend
+
+Base URL (dev): `http://192.168.0.103:2736`
+Prefix semua endpoint: `/api/v1`
+
+Semua response sukses dibungkus:
+
+```json
+{ "data": <T>, "message": null | "string" }
+```
+
+## Autentikasi
+
+- Login mengembalikan `access_token` (JSON body) dan `refresh_token` (httpOnly cookie `refresh_token`).
+- Endpoint protected mengirim header `Authorization: Bearer <access_token>`.
+- Saat access habis, panggil `POST /api/v1/auth/refresh` (cookie otomatis terkirim). Server mengembalikan access token baru dan cookie refresh baru (rotasi).
+- Field role di JWT: `Dev` atau `User`. Endpoint `GET /users`, `DELETE /users/{id}`, dan beberapa write butuh role `Dev`.
+
+Header wajib untuk endpoint protected:
+
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Format ID: UUID v4 (`"550e8400-e29b-41d4-a716-446655440000"`).
+
+Error umum:
+
+| Status | Meaning                  |
+| ------ | ------------------------ |
+| 400    | BadRequest               |
+| 401    | Unauthorized             |
+| 403    | Forbidden                |
+| 404    | NotFound                 |
+| 500    | InternalServerError      |
+
+---
+
+## 1. Auth
+
+### POST /api/v1/auth/register
+
+Public. Buat akun baru.
+
+Request body:
+
+```json
+{
+  "username": "string (min 3)",
+  "email": "string|null",
+  "password": "string (min 8)"
+}
+```
+
+Response 201:
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "username": "string",
+    "email": "string|null",
+    "created_at": "ISO-8601"
+  },
+  "message": "Succes Create User"
+}
+```
+
+### POST /api/v1/auth/login
+
+Public. Set cookie `refresh_token` di response.
+
+Request body:
+
+```json
+{
+  "username": "string",
+  "password": "string"
+}
+```
+
+Response 200:
+
+```json
+{
+  "data": {
+    "access_token": "jwt",
+    "token_type": "Bearer"
+  },
+  "message": "Success"
+}
+```
+
+Set-Cookie: `refresh_token=<family>.<token>; HttpOnly; SameSite=Strict; Path=/`
+
+### POST /api/v1/auth/refresh
+
+Public, tapi butuh cookie `refresh_token` dari login sebelumnya. Rotasi token: cookie lama invalid.
+
+Response 200:
+
+```json
+{
+  "data": {
+    "access_token": "jwt",
+    "token_type": "Bearer"
+  },
+  "message": "Success"
+}
+```
+
+Set-Cookie: `refresh_token=<family>.<new_token>; HttpOnly; SameSite=Strict; Path=/`
+
+---
+
+## 2. Users
+
+Semua butuh `Authorization: Bearer ...`. `GET /users` dan `DELETE /users/{id}` butuh role `Dev`.
+
+### GET /api/v1/users
+
+Dev only. List semua user.
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "username": "string",
+      "email": "string|null",
+      "created_at": "ISO-8601"
+    }
+  ],
+  "message": null
+}
+```
+
+### GET /api/v1/users/{id}
+
+Owner atau Dev.
+
+Response 200: sama seperti item di list.
+
+### PATCH /api/v1/users/{id}
+
+Owner sendiri atau Dev. Semua field optional.
+
+```json
+{
+  "username": "string (min 3)?",
+  "email": "string|null?",
+  "password": "string (min 8)?"
+}
+```
+
+Response 200: `UserProfile`.
+
+### DELETE /api/v1/users/{id}
+
+Dev only. Tidak boleh hapus akun sendiri.
+
+Response 204, body `data: null`, message string konfirmasi.
+
+---
+
+## 3. Brands
+
+Semua butuh Bearer token.
+
+### GET /api/v1/brands
+
+List brand milik user.
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "name": "string",
+      "total_parfume": 0
+    }
+  ],
+  "message": "Succes"
+}
+```
+
+### POST /api/v1/brands
+
+```json
+{ "name_brands": "string (min 3)" }
+```
+
+Response 201, `data: null`, `message: "Created Brand"`.
+
+### GET /api/v1/brands/{id}
+
+Response 200: satu `Brand`.
+
+### PATCH /api/v1/brands/{id}
+
+```json
+{
+  "brands_id": "uuid",
+  "name_brands": "string (min 3)"
+}
+```
+
+Response 200, `data: "Berhasil"`.
+
+---
+
+## 4. Parfume
+
+Semua butuh Bearer token.
+
+### POST /api/v1/parfume
+
+```json
+{
+  "brands_id": "uuid",
+  "name": "string (min 3)",
+  "concrentration": "string|null",
+  "description": "string|null"
+}
+```
+
+Response 201.
+
+### GET /api/v1/parfume/{id}/batch
+
+List semua batch untuk parfume tsb.
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "parfume_id": "uuid",
+      "quantity_ml": "decimal",
+      "purchase_price": "decimal"
+    }
+  ],
+  "message": "Succes"
+}
+```
+
+### POST /api/v1/parfume/{id}/batch
+
+```json
+{
+  "quantity_ml": "decimal",
+  "purchase_price": "decimal"
+}
+```
+
+Response 201.
+
+### GET /api/v1/parfume/{id}/decant
+
+List decant untuk parfume.
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "parfume_id": "uuid",
+      "size_ml": 0,
+      "sell_price": "decimal",
+      "is_active": true
+    }
+  ],
+  "message": "Succes"
+}
+```
+
+### POST /api/v1/parfume/{id}/decant
+
+```json
+{
+  "size_ml": 0,
+  "sell_price": "decimal",
+  "is_active": true
+}
+```
+
+Response 201.
+
+---
+
+## 5. Batch
+
+Semua butuh Bearer token.
+
+### PATCH /api/v1/batch/{id}
+
+```json
+{
+  "quantity_ml": "decimal?",
+  "purchase_price": "decimal?"
+}
+```
+
+Response 200, `data: "Berhasil"`.
+
+### POST /api/v1/batch/{id}/bottle
+
+Field `batch_id` harus sama dengan `{id}` di path (validasi server).
+
+```json
+{
+  "batch_id": "uuid",
+  "remaining_ml": "decimal",
+  "status": "available" | "empty" | "inactive"
+}
+```
+
+Response 201, `message: "Created Bottle"`.
+
+---
+
+## 6. Bottle
+
+Semua butuh Bearer token. Akses dibatasi ke brand milik user (server cek ownership).
+
+### GET /api/v1/bottle/{id}
+
+Response 200:
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "batch_parfume_id": "uuid",
+    "remaining_ml": "decimal",
+    "status": "available"
+  },
+  "message": null
+}
+```
+
+### PATCH /api/v1/bottle/{id}
+
+Hanya `remaining_ml` dan `status` yang bisa diupdate. `batch_parfume_id` tidak bisa dipindahkan lewat endpoint ini.
+
+```json
+{
+  "remaining_ml": "decimal?",
+  "status": "available" | "empty" | "inactive" (case-insensitive)?
+}
+```
+
+Response 200, `data: "Berhasil"`.
+
+### DELETE /api/v1/bottle/{id}
+
+Response 200, `data: "Berhasil dihapus"`.
+
+---
+
+## Catatan untuk Frontend
+
+- `BigDecimal` di Rust di-serialize sebagai string di JSON (preserves presisi). Frontend parse via `new BigDecimal(...)` atau pakai library desimal. Jangan cast ke `number` kalau presisi penting (harga, ml).
+- Pakai `fetch` / `axios` dengan `credentials: 'include'` untuk `/auth/refresh` agar cookie terkirim.
+- Simpan access token di memory (state) bukan localStorage; refresh lewat endpoint `/auth/refresh`.
+- UUID dipakai sebagai path param dan foreign key — pakai `crypto.randomUUID()` untuk generate ID di FE jika perlu placeholder.
+- Bentuk pagination belum ada; list return semua row. Handle limit di FE kalau perlu.
