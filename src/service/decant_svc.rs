@@ -44,6 +44,8 @@ pub async fn svc_create_decant(
             ON f.brands_id = b.id
         WHERE f.id = $1
           AND b.owner_id = $2
+          AND f.deleted_at IS NULL
+          AND b.deleted_at IS NULL
         "#,
         id,
         owner,
@@ -95,6 +97,9 @@ pub async fn svc_get_all_decant(
             ON p.brands_id = br.id
         WHERE d.parfume_id = $1
         AND br.owner_id = $2
+        AND d.deleted_at IS NULL
+        AND p.deleted_at IS NULL
+        AND br.deleted_at IS NULL
         "#,
         id,
         uuid
@@ -133,6 +138,9 @@ pub async fn svc_update_decant(
         JOIN brands b ON p.brands_id = b.id
         WHERE b.owner_id = $1
           AND d.id = $2
+          AND d.deleted_at IS NULL
+          AND p.deleted_at IS NULL
+          AND b.deleted_at IS NULL
         "#,
         owner,
         id
@@ -176,6 +184,9 @@ pub async fn svc_update_decant(
     WHERE d.parfume_id = p.id
       AND b.owner_id = $4
       AND d.id = $5
+      AND d.deleted_at IS NULL
+      AND p.deleted_at IS NULL
+      AND b.deleted_at IS NULL
     "#,
         size_ml,
         sell_price,
@@ -194,4 +205,89 @@ pub async fn svc_update_decant(
     }
 
     Ok("Berhasil".to_string())
+}
+
+pub async fn svc_delete_decant(
+    pool: &PgPool,
+    access: &AccesClaims,
+    id: &Uuid,
+) -> Result<String, AppError> {
+    let owner = match Uuid::parse_str(access.sub.as_str()) {
+        Ok(val) => val,
+        Err(_) => {
+            return Err(AppError::InternalServerError(
+                None,
+                Some("svc_delete_decant: gagal parse UUID dari claims".to_string()),
+            ));
+        }
+    };
+
+    let decant = sqlx::query!(
+        r#"
+        SELECT
+            d.id AS "id!",
+            EXISTS (SELECT 1 FROM order_items oi WHERE oi.decant_id = d.id) AS "has_order!"
+        FROM decant d
+        JOIN parfume p
+            ON p.id = d.parfume_id
+        JOIN brands b
+            ON b.id = p.brands_id
+        WHERE d.id = $1
+          AND b.owner_id = $2
+          AND d.deleted_at IS NULL
+          AND p.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+        "#,
+        id,
+        owner
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound(
+            None,
+            Some("svc_delete_decant: decant tidak ditemukan".to_string()),
+        )
+    })?;
+
+    if decant.has_order {
+        let soft = sqlx::query!(
+            r#"
+            UPDATE decant
+            SET deleted_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            "#,
+            id
+        )
+        .execute(pool)
+        .await?;
+
+        if soft.rows_affected() == 0 {
+            return Err(AppError::Conflict(
+                None,
+                Some("svc_delete_decant: decant sudah terhapus".to_string()),
+            ));
+        }
+
+        return Ok("Berhasil dihapus".to_string());
+    }
+
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM decant d
+        WHERE d.id = $1
+        "#,
+        id
+    )
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(
+            None,
+            Some("svc_delete_decant: decant tidak ditemukan".to_string()),
+        ));
+    }
+
+    Ok("Berhasil dihapus".to_string())
 }

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     c_auth::refresh_token::AccesClaims, dto::{
         ApiResponse, request::decant_req::{CreateDecant, UpdateDecant}, response::decant_res::DecantResponse,
-    }, error::error::AppError, service::decant_svc::{svc_create_decant, svc_get_all_decant, svc_update_decant}, state::AppState,
+    }, error::error::AppError, service::decant_svc::{svc_create_decant, svc_delete_decant, svc_get_all_decant, svc_update_decant}, state::AppState,
 };
 
 pub async fn create_decant(
@@ -57,6 +57,22 @@ pub async fn update_decant(
         StatusCode::OK,
         Json(ApiResponse {
             data: res,
+            message: None,
+        }),
+    ))
+}
+
+pub async fn delete_decant(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let result = svc_delete_decant(&state.db, &access, &id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: result,
             message: None,
         }),
     ))

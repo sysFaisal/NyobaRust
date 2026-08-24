@@ -88,7 +88,7 @@ pub async fn svc_create_user(
             let respon = sqlx::query_as!(
                 UserProfile,
                 r#"
-                INSERT INTO users (username, email, password_hash, role )
+                INSERT INTO users (username, email, password_hash, role)
                 VALUES ($1, $2, $3, $4)
                 RETURNING id, username, email, created_at"#,
                 payload.username,

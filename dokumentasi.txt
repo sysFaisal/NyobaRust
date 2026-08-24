@@ -14,7 +14,7 @@ Semua response sukses dibungkus:
 - Login mengembalikan `access_token` (JSON body) dan `refresh_token` (httpOnly cookie `refresh_token`).
 - Endpoint protected mengirim header `Authorization: Bearer <access_token>`.
 - Saat access habis, panggil `POST /api/v1/auth/refresh` (cookie otomatis terkirim). Server mengembalikan access token baru dan cookie refresh baru (rotasi).
-- Field role di JWT: `Dev` atau `User`. Endpoint `GET /users`, `DELETE /users/{id}`, dan beberapa write butuh role `Dev`.
+- Field role di JWT: `Dev` atau `User`. Endpoint `GET /users` dan `DELETE /users/{id}` butuh role `Dev`.
 
 Header wajib untuk endpoint protected:
 
@@ -25,15 +25,52 @@ Content-Type: application/json
 
 Format ID: UUID v4 (`"550e8400-e29b-41d4-a716-446655440000"`).
 
-Error umum:
+## Format Error
 
-| Status | Meaning                  |
-| ------ | ------------------------ |
-| 400    | BadRequest               |
-| 401    | Unauthorized             |
-| 403    | Forbidden                |
-| 404    | NotFound                 |
-| 500    | InternalServerError      |
+Body error TIDAK dibungkus ApiResponse, bentuknya langsung:
+
+```json
+{ "code": "NOT_FOUND", "message": "..." }
+```
+
+| Status | Code                  | Meaning                          |
+| ------ | --------------------- | -------------------------------- |
+| 400    | BAD_REQUEST           | Validasi input gagal             |
+| 401    | UNAUTHORIZED          | Belum login / token invalid      |
+| 403    | FORBIDDEN             | Bukan pemilik resource / bukan Dev |
+| 404    | NOT_FOUND             | Resource tidak ada / sudah dihapus |
+| 409    | CONFLICT              | Duplikat (misal username/email)  |
+| 500    | INTERNAL_SERVER_ERROR | Kesalahan server                 |
+
+---
+
+## Konsep Penting: Soft Delete & Visibilitas
+
+Setiap entitas inventory (`brands`, `parfume`, `batch`, `bottle`, `decant`) punya penanda `deleted_at` internal.
+
+Aturan visibilitas — **entitas dianggap terhapus jika dia sendiri ATAU salah satu induknya** telah dihapus:
+
+```
+brands → parfume → batch_parfume → batch_parfume_bottle
+                 → decant
+```
+
+Konsekuensi praktis untuk FE:
+
+- Item yang di-DELETE menghilang dari SEMUA endpoint fetch/update. Tidak perlu tahu itu soft atau hard delete.
+- Riwayat transaksi lama tetap utuh di backend.
+- Tidak ada endpoint restore (untuk sementara restore hanya via database).
+
+Aturan DELETE seragam:
+
+- **Fresh** (belum punya riwayat order/movement) → hard delete sungguhan, anak-anaknya ikut terhapus.
+- **Ada riwayat** → soft delete (hanya ditandai, tetap ada di DB).
+
+Validasi kapasitas stok (server-side):
+
+- `quantity_ml` batch = ukuran **per botol**. Jumlah row bottle = jumlah unit fisik yang dibeli.
+- `remaining_ml` botol harus `> 0` dan tidak boleh melebihi `quantity_ml` batch-nya.
+- `quantity_ml` batch tidak bisa diubah lebih kecil dari sisa ml botol terbesarnya.
 
 ---
 
@@ -98,51 +135,35 @@ Set-Cookie: `refresh_token=<family>.<token>; HttpOnly; SameSite=Strict; Path=/`
 
 Public, tapi butuh cookie `refresh_token` dari login sebelumnya. Rotasi token: cookie lama invalid.
 
-Response 200:
-
-```json
-{
-  "data": {
-    "access_token": "jwt",
-    "token_type": "Bearer"
-  },
-  "message": "Success"
-}
-```
-
-Set-Cookie: `refresh_token=<family>.<new_token>; HttpOnly; SameSite=Strict; Path=/`
+Response 200: sama seperti login. Set-Cookie: cookie refresh baru.
 
 ---
 
 ## 2. Users
 
-Semua butuh `Authorization: Bearer ...`. `GET /users` dan `DELETE /users/{id}` butuh role `Dev`.
+Semua butuh Bearer token. `GET /users` dan `DELETE /users/{id}` butuh role `Dev`.
 
 ### GET /api/v1/users
 
 Dev only. List semua user.
 
-Response 200:
-
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "username": "string",
-      "email": "string|null",
-      "created_at": "ISO-8601"
-    }
-  ],
-  "message": null
-}
-```
-
 ### GET /api/v1/users/{id}
 
 Owner atau Dev.
 
-Response 200: sama seperti item di list.
+Response 200: `UserProfile`:
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "username": "string",
+    "email": "string|null",
+    "created_at": "ISO-8601"
+  },
+  "message": null
+}
+```
 
 ### PATCH /api/v1/users/{id}
 
@@ -156,23 +177,23 @@ Owner sendiri atau Dev. Semua field optional.
 }
 ```
 
-Response 200: `UserProfile`.
+Response 200: `UserProfile`, message `"Success Update"`.
 
 ### DELETE /api/v1/users/{id}
 
 Dev only. Tidak boleh hapus akun sendiri.
 
-Response 204, body `data: null`, message string konfirmasi.
+Response 204, body `data: null`.
 
 ---
 
 ## 3. Brands
 
-Semua butuh Bearer token.
+Semua butuh Bearer token. Hanya brand milik sendiri yang bisa diakses.
 
 ### GET /api/v1/brands
 
-List brand milik user.
+List brand milik user (yang belum dihapus). `total_parfume` hanya menghitung parfume yang masih hidup.
 
 Response 200:
 
@@ -195,7 +216,7 @@ Response 200:
 { "name_brands": "string (min 3)" }
 ```
 
-Response 201, `data: null`, `message: "Created Brand"`.
+Response 201, `data: null`.
 
 ### GET /api/v1/brands/{id}
 
@@ -210,13 +231,47 @@ Response 200: satu `Brand`.
 }
 ```
 
+Field `brands_id` harus sama dengan `{id}` di path.
+
 Response 200, `data: "Berhasil"`.
+
+### DELETE /api/v1/brands/{id}
+
+Hapus brand beserta seluruh isi (parfume/batch/bottle/decant).
+
+- Brand fresh (belum ada transaksi) → hard delete semua anak-anaknya.
+- Ada riwayat transaksi → soft delete (hilang dari semua fetch, data tetap di DB).
+
+Response 200, `data: "Berhasil dihapus"`.
+
+### GET /api/v1/brands/{id}/parfume
+
+List parfume dalam brand tsb.
+
+Response 200: array `Parfume` (lihat bagian Parfume).
 
 ---
 
 ## 4. Parfume
 
 Semua butuh Bearer token.
+
+Bentuk `Parfume`:
+
+```json
+{
+  "id": "uuid",
+  "brands_id": "uuid",
+  "brands_name": "string",
+  "name": "string",
+  "concentration": "string|null",
+  "description": "string|null"
+}
+```
+
+### GET /api/v1/parfume
+
+List SEMUA parfume milik user lintas brand.
 
 ### POST /api/v1/parfume
 
@@ -229,7 +284,19 @@ Semua butuh Bearer token.
 }
 ```
 
+Catatan: nama field memang `concrentration` (typo bawaan, dipertahankan demi kompatibilitas).
+
 Response 201.
+
+### GET /api/v1/parfume/{id}
+
+Response 200: satu `Parfume`. 404 jika tidak ada / sudah dihapus.
+
+### DELETE /api/v1/parfume/{id}
+
+Sama seperti brand: fresh → hard delete (batch, bottle, decant ikut); ada riwayat → soft delete.
+
+Response 200, `data: "Berhasil dihapus"`.
 
 ### GET /api/v1/parfume/{id}/batch
 
@@ -253,18 +320,22 @@ Response 200:
 
 ### POST /api/v1/parfume/{id}/batch
 
+`quantity_ml` = ukuran per botol (contoh beli parfume retail 30ml → 30).
+
 ```json
 {
-  "quantity_ml": "decimal",
+  "quantity_ml": "decimal (> 0)",
   "purchase_price": "decimal"
 }
 ```
+
+400 jika `quantity_ml <= 0` atau brand/parfume tidak valid.
 
 Response 201.
 
 ### GET /api/v1/parfume/{id}/decant
 
-List decant untuk parfume.
+List decant untuk parfume (yang belum dihapus).
 
 Response 200:
 
@@ -310,27 +381,44 @@ Semua butuh Bearer token.
 }
 ```
 
+Aturan: `quantity_ml` baru tidak boleh lebih kecil dari `remaining_ml` botol terbesar dalam batch tsb (400 jika melanggar).
+
 Response 200, `data: "Berhasil"`.
 
+### DELETE /api/v1/batch/{id}
+
+- Batch punya botol dengan riwayat order/movement → soft delete batch.
+- Semua botolnya fresh → hard delete batch + semua botolnya.
+
+Response 200, `data: "Berhasil dihapus"`.
+
 ### POST /api/v1/batch/{id}/bottle
+
+Mendaftarkan unit fisik baru di bawah batch (beli 10 botol → 10 kali call ini).
 
 Field `batch_id` harus sama dengan `{id}` di path (validasi server).
 
 ```json
 {
   "batch_id": "uuid",
-  "remaining_ml": "decimal",
+  "remaining_ml": "decimal (> 0, <= quantity_ml batch)",
   "status": "available" | "empty" | "inactive"
 }
 ```
 
+Server otomatis mencatat stock movement `in/initial` sebesar `remaining_ml`.
+
 Response 201, `message: "Created Bottle"`.
+
+### GET /api/v1/batch/{id}/bottle
+
+List botol dalam batch.
 
 ---
 
 ## 6. Bottle
 
-Semua butuh Bearer token. Akses dibatasi ke brand milik user (server cek ownership).
+Semua butuh Bearer token. Akses dibatasi ke brand milik user.
 
 ### GET /api/v1/bottle/{id}
 
@@ -350,7 +438,7 @@ Response 200:
 
 ### PATCH /api/v1/bottle/{id}
 
-Hanya `remaining_ml` dan `status` yang bisa diupdate. `batch_parfume_id` tidak bisa dipindahkan lewat endpoint ini.
+Hanya `remaining_ml` dan `status` yang bisa diupdate. Keduanya optional (PATCH partial).
 
 ```json
 {
@@ -359,11 +447,160 @@ Hanya `remaining_ml` dan `status` yang bisa diupdate. `batch_parfume_id` tidak b
 }
 ```
 
+Perilaku:
+
+- Update `status` saja → tanpa validasi kapasitas.
+- Update `remaining_ml`:
+  - harus `> 0` dan `<= quantity_ml` batch;
+  - perubahan otomatis tercatat sebagai stock movement `adjustment`
+    (`in` jika naik, `out` jika turun).
+
 Response 200, `data: "Berhasil"`.
 
 ### DELETE /api/v1/bottle/{id}
 
+- Botol punya riwayat di `order_items` atau `stock_movements` → soft delete.
+- Fresh → hard delete.
+
 Response 200, `data: "Berhasil dihapus"`.
+
+---
+
+## 7. Decant
+
+Semua butuh Bearer token.
+
+### PATCH /api/v1/decant/{id}
+
+Semua field optional.
+
+```json
+{
+  "size_ml": 0?,
+  "sell_price": "decimal?",
+  "is_active": "bool?"
+}
+```
+
+`is_active = false` menyembunyikan decant dari pilihan transaksi, tapi item tetap muncul di menu management.
+
+Response 200, `data: "Berhasil"`.
+
+### DELETE /api/v1/decant/{id}
+
+- Pernah masuk `order_items` → soft delete.
+- Belum pernah → hard delete.
+
+Response 200, `data: "Berhasil dihapus"`.
+
+---
+
+## 8. Stock Movement (internal)
+
+Tabel ledger yang dicatat otomatis oleh server (belum ada endpoint publik):
+
+| Kejadian                | type   | reason     | quantity (ml)       |
+| ----------------------- | ------ | ---------- | ------------------- |
+| Create bottle           | in     | initial    | = remaining_ml awal |
+| Update remaining_ml     | in/out | adjustment | delta perubahan     |
+| Order dibuat            | out    | sale       | size_ml x quantity  |
+
+Invariant: `SUM(in) - SUM(out)` per botol = `remaining_ml` botol tersebut
+(berlaku untuk botol yang diciptakan setelah fitur ini aktif).
+
+---
+
+## 9. Order
+
+Semua butuh Bearer token.
+
+Bentuk `Order` (item history):
+
+```json
+{
+  "id": "uuid",
+  "bottle_id": "uuid",
+  "decant_id": "uuid",
+  "total_price": "decimal",
+  "quantity": 0,
+  "price": "decimal",
+  "status": "pending" | "success" | "failed",
+  "size_ml": 0,
+  "parfume_name": "string",
+  "brands_name": "string",
+  "created_at": "ISO-8601"
+}
+```
+
+### POST /api/v1/order
+
+Buat order penjualan decant dari sebuah bottle.
+
+```json
+{
+  "bottle_id": "uuid",
+  "decant_id": "uuid",
+  "quantity": 1
+}
+```
+
+Perilaku server (semua dalam satu transaksi atomik):
+
+1. Validasi `decant` dan `bottle`: harus ada, milik user, **belum dihapus**
+   (soft-deleted otomatis ditolak 404), decant `is_active = true`,
+   bottle `status = available`.
+2. Validasi stok: `size_ml * quantity` tidak boleh melebihi
+   `remaining_ml` bottle.
+3. Kurangi `remaining_ml` bottle sebesar konsumsi (dilindungi dari race
+   condition — dua order bersamaan tidak bisa oversell).
+4. Insert `order_items` dengan `status = success` (penjualan langsung
+   final: stok sudah dipotong dan movement sudah tercatat di langkah 3 & 5).
+5. Catat stock movement `out/sale`.
+
+Error umum:
+
+| Status | Sebab                                        |
+| ------ | -------------------------------------------- |
+| 400    | quantity < 1 / decant inactive / bottle bukan available / stok kurang |
+| 404    | decant atau bottle tidak ditemukan / sudah dihapus    |
+| 409    | stok berubah saat transaksi (race condition)          |
+
+Response 201, `data: null`, `message: "berhasil"`.
+
+Catatan: order langsung dibuat dengan `status = success`. Enum `failed`
+disiapkan untuk alur refund di masa depan — jika nanti ada pembatalan,
+harus menulis movement balik `in/refund` dan mengembalikan
+`remaining_ml` bottle.
+
+### GET /api/v1/order
+
+History pembelian user (semua order item, terbaru dulu).
+
+PENTING: history TIDAK memfilter soft-delete — produk/botol/decant yang
+sudah diarsip tetap muncul di riwayat (nama parfume & brand ikut disertakan).
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "bottle_id": "uuid",
+      "decant_id": "uuid",
+      "total_price": "decimal",
+      "quantity": 1,
+      "price": "decimal",
+      "status": "success",
+      "size_ml": 5,
+      "parfume_name": "string",
+      "brands_name": "string",
+      "created_at": "ISO-8601"
+    }
+  ],
+  "message": "Succes"
+}
+```
 
 ---
 

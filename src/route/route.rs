@@ -1,12 +1,15 @@
-use crate::handlers::batch::{create_batch, get_all_batch, update_batch};
+use crate::handlers::batch::{create_batch, delete_batch, get_all_batch, update_batch};
 use crate::handlers::bottle::{
     create_bottle, delete_bottle, get_all_bottle, get_bottle, update_bottle,
 };
-use crate::handlers::brand::{create_brands, get_all_brands, get_brands_by_id, update_brands};
-use crate::handlers::decant::{create_decant, get_all_decant, update_decant};
-use crate::handlers::parfume::{
-    create_parfum, get_all_parfume, get_all_parfume_uni, get_parfume_by_id,
+use crate::handlers::brand::{
+    create_brands, delete_brands, get_all_brands, get_brands_by_id, update_brands,
 };
+use crate::handlers::decant::{create_decant, delete_decant, get_all_decant, update_decant};
+use crate::handlers::parfume::{
+    create_parfum, delete_parfume, get_all_parfume, get_all_parfume_uni, get_parfume_by_id,
+};
+use crate::handlers::order::{create_order, get_all_order};
 use crate::handlers::user::{
     create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
     update_user,
@@ -56,7 +59,12 @@ pub fn route_user() -> Router<AppState> {
 pub fn router_brands() -> Router<AppState> {
     Router::new()
         .route("/", get(get_all_brands).post(create_brands))
-        .route("/{id}", get(get_brands_by_id).patch(update_brands))
+        .route(
+            "/{id}",
+            get(get_brands_by_id)
+                .patch(update_brands)
+                .delete(delete_brands),
+        )
         .route("/{id}/parfume", get(get_all_parfume))
         .layer(middleware::from_fn(auth_middleware))
 }
@@ -64,7 +72,10 @@ pub fn router_brands() -> Router<AppState> {
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
         .route("/", post(create_parfum).get(get_all_parfume_uni))
-        .route("/{id}", get(get_parfume_by_id))
+        .route(
+            "/{id}",
+            get(get_parfume_by_id).delete(delete_parfume),
+        )
         .route("/{id}/batch", get(get_all_batch).post(create_batch))
         .route("/{id}/decant", get(get_all_decant).post(create_decant))
         .layer(middleware::from_fn(auth_middleware))
@@ -72,14 +83,14 @@ pub fn router_parfume() -> Router<AppState> {
 
 pub fn router_batch() -> Router<AppState> {
     Router::new()
-        .route("/{id}", patch(update_batch))
+        .route("/{id}", patch(update_batch).delete(delete_batch))
         .route("/{id}/bottle", post(create_bottle).get(get_all_bottle))
         .layer(middleware::from_fn(auth_middleware))
 }
 
 pub fn router_decant() -> Router<AppState> {
     Router::new()
-        .route("/{id}", patch(update_decant))
+        .route("/{id}", patch(update_decant).delete(delete_decant))
         .layer(middleware::from_fn(auth_middleware))
 }
 
@@ -92,6 +103,12 @@ pub fn router_bottle() -> Router<AppState> {
         .layer(middleware::from_fn(auth_middleware))
 }
 
+pub fn router_order() -> Router<AppState> {
+    Router::new()
+        .route("/", post(create_order).get(get_all_order))
+        .layer(middleware::from_fn(auth_middleware))
+}
+
 pub async fn create_route(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1/auth", auth_user())
@@ -101,5 +118,6 @@ pub async fn create_route(state: AppState) -> Router {
         .nest("/api/v1/batch", router_batch())
         .nest("/api/v1/bottle", router_bottle())
         .nest("/api/v1/decant", router_decant())
+        .nest("/api/v1/order", router_order())
         .with_state(state)
 }

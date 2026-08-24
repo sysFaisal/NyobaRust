@@ -1,3 +1,4 @@
+use bigdecimal::BigDecimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -33,6 +34,13 @@ pub async fn svc_create_batch(
     access: &AccesClaims,
     id: &Uuid,
 ) -> Result<String, AppError> {
+    if req.quantity_ml <= BigDecimal::from(0) {
+        return Err(AppError::BadRequest(
+            Some("quantity_ml harus lebih dari 0".to_string()),
+            Some("svc_create_batch: quantity_ml <= 0".to_string()),
+        ));
+    }
+
     let uuid = match Uuid::parse_str(access.sub.as_str()) {
         Ok(val) => val,
         Err(_) => {
@@ -58,6 +66,8 @@ pub async fn svc_create_batch(
         ON f.brands_id = b.id
     WHERE f.id = $1
       AND b.owner_id = $2
+      AND f.deleted_at IS NULL
+      AND b.deleted_at IS NULL
     "#,
         id,
         uuid,
@@ -107,6 +117,9 @@ pub async fn svc_get_all_batch(
             ON p.brands_id = br.id
         WHERE bp.parfume_id = $1
         AND br.owner_id = $2
+        AND bp.deleted_at IS NULL
+        AND p.deleted_at IS NULL
+        AND br.deleted_at IS NULL
         "#,
         id,
         uuid
@@ -138,7 +151,12 @@ pub async fn svc_update_batch(
         r#"
         SELECT
             bf.quantity_ml,
-            bf.purchase_price
+            bf.purchase_price,
+            COALESCE((
+                SELECT MAX(bf2.remaining_ml)
+                FROM batch_parfume_bottle bf2
+                WHERE bf2.batch_parfume_id = bf.id
+            ), 0) AS "max_remaining_ml!"
         FROM batch_parfume bf
         JOIN parfume f
             ON bf.parfume_id = f.id
@@ -146,17 +164,33 @@ pub async fn svc_update_batch(
             ON f.brands_id = b.id
         WHERE b.owner_id = $1
           AND bf.id = $2
+          AND bf.deleted_at IS NULL
+          AND f.deleted_at IS NULL
+          AND b.deleted_at IS NULL
     "#,
         uuid,
         id,
     )
-    .fetch_one(pool)
-    .await?;
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound(
+            None,
+            Some("svc_update_batch: batch tidak ditemukan".to_string()),
+        )
+    })?;
 
     let quantity_ml = match &req.quantity_ml {
         Some(val) => val,
         None => &batch.quantity_ml,
     };
+
+    if quantity_ml < &batch.max_remaining_ml {
+        return Err(AppError::BadRequest(
+            Some("quantity_ml tidak boleh lebih kecil dari sisa ml botol terbesar".to_string()),
+            Some("svc_update_batch: quantity_ml baru di bawah remaining_ml salah satu bottle".to_string()),
+        ));
+    }
 
     let purchase_price = match &req.purchase_price {
         Some(val) => val,
@@ -185,4 +219,104 @@ pub async fn svc_update_batch(
     }
 
     Ok("Berhasil".to_string())
+}
+
+pub async fn svc_delete_batch(
+    pool: &PgPool,
+    access: &AccesClaims,
+    id: &Uuid,
+) -> Result<String, AppError> {
+    let uuid = match Uuid::parse_str(access.sub.as_str()) {
+        Ok(val) => val,
+        Err(_) => {
+            return Err(AppError::InternalServerError(
+                None,
+                Some("svc_delete_batch: gagal parse UUID dari claims".to_string()),
+            ));
+        }
+    };
+
+    let batch = sqlx::query!(
+        r#"
+        SELECT
+            bp.id AS "id!",
+            EXISTS (
+                SELECT 1
+                FROM batch_parfume_bottle bf
+                WHERE bf.batch_parfume_id = bp.id
+                  AND (
+                      EXISTS (SELECT 1 FROM order_items oi WHERE oi.bottle_id = bf.id)
+                   OR EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.bottle_id = bf.id)
+                  )
+            ) AS "has_history!"
+        FROM batch_parfume bp
+        JOIN parfume f
+            ON f.id = bp.parfume_id
+        JOIN brands b
+            ON f.brands_id = b.id
+        WHERE bp.id = $1
+          AND b.owner_id = $2
+          AND bp.deleted_at IS NULL
+          AND f.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+        "#,
+        id,
+        uuid
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound(
+            None,
+            Some("svc_delete_batch: batch tidak ditemukan".to_string()),
+        )
+    })?;
+
+    if batch.has_history {
+        let soft = sqlx::query!(
+            r#"
+            UPDATE batch_parfume
+            SET deleted_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            "#,
+            id
+        )
+        .execute(pool)
+        .await?;
+
+        if soft.rows_affected() == 0 {
+            return Err(AppError::Conflict(
+                None,
+                Some("svc_delete_batch: batch sudah terhapus".to_string()),
+            ));
+        }
+
+        return Ok("Berhasil dihapus".to_string());
+    }
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!(
+        r#"
+        DELETE FROM batch_parfume_bottle
+        WHERE batch_parfume_id = $1
+        "#,
+        id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        DELETE FROM batch_parfume
+        WHERE id = $1
+        "#,
+        id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok("Berhasil dihapus".to_string())
 }

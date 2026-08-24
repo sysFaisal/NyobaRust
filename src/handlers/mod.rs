@@ -4,3 +4,4 @@ pub mod parfume;
 pub mod decant;
 pub mod batch;
 pub mod bottle;
+pub mod order;

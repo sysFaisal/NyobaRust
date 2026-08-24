@@ -9,7 +9,8 @@ use crate::dto::request::brand_req::{CreateBrands, UpdateBrands};
 use crate::dto::response::brand_res::Brand;
 use crate::error::error::AppError;
 use crate::service::brands_svc::{
-    svc_create_brands, svc_get_all_brands, svc_get_brands_by_id, svc_update_brands,
+    svc_create_brands, svc_delete_brand, svc_get_all_brands, svc_get_brands_by_id,
+    svc_update_brands,
 };
 use crate::state::AppState;
 
@@ -77,6 +78,22 @@ pub async fn get_brands_by_id(
         StatusCode::OK,
         Json(ApiResponse {
             data: res,
+            message: None,
+        }),
+    ))
+}
+
+pub async fn delete_brands(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let result = svc_delete_brand(&state.db, &access, &id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: result,
             message: None,
         }),
     ))

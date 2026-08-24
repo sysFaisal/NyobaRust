@@ -13,7 +13,7 @@ use crate::{
         response::batch_res::BatchResponse,
     },
     error::error::AppError,
-    service::batch_svc::{svc_create_batch, svc_get_all_batch, svc_update_batch},
+    service::batch_svc::{svc_create_batch, svc_delete_batch, svc_get_all_batch, svc_update_batch},
     state::AppState,
 };
 
@@ -62,6 +62,22 @@ pub async fn update_batch(
         StatusCode::OK,
         Json(ApiResponse {
             data: res,
+            message: None,
+        }),
+    ))
+}
+
+pub async fn delete_batch(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+    let result = svc_delete_batch(&state.db, &access, &id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: result,
             message: None,
         }),
     ))

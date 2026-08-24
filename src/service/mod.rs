@@ -5,3 +5,4 @@ pub mod parfume_svc;
 pub mod batch_svc;
 pub mod decant_svc;
 pub mod bottle_svc;
+pub mod order_svc;

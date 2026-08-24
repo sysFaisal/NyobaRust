@@ -23,6 +23,6 @@ pub struct CreateBottle {
 #[derive(Deserialize, Validate)]
 pub struct UpdateBottle {
     pub remaining_ml: Option<BigDecimal>,
-    pub status: Option<String>,
+    pub status: Option<BottleStatus>,
 }
 
