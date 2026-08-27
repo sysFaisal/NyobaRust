@@ -7,3 +7,8 @@ pub struct CreateOrder {
     pub decant_id: Uuid,
     pub quantity: i32,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct OrderPageQuery {
+    pub page: Option<i64>,
+}

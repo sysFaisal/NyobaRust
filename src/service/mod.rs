@@ -6,3 +6,4 @@ pub mod batch_svc;
 pub mod decant_svc;
 pub mod bottle_svc;
 pub mod order_svc;
+pub mod revenue_svc;

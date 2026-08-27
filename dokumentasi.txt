@@ -13,8 +13,11 @@ Semua response sukses dibungkus:
 
 - Login mengembalikan `access_token` (JSON body) dan `refresh_token` (httpOnly cookie `refresh_token`).
 - Endpoint protected mengirim header `Authorization: Bearer <access_token>`.
+- **Access token berlaku 15 menit.** Setelah expired, server mengembalikan **401 UNAUTHORIZED** dengan pesan `"access token expired"`.
 - Saat access habis, panggil `POST /api/v1/auth/refresh` (cookie otomatis terkirim). Server mengembalikan access token baru dan cookie refresh baru (rotasi).
+- Refresh token berlaku **7 hari**. Jika expired, seluruh token family dihapus — user harus login ulang.
 - Field role di JWT: `Dev` atau `User`. Endpoint `GET /users` dan `DELETE /users/{id}` butuh role `Dev`.
+- **Client wajib handle 401**: intercept response 401 → hit `/api/v1/auth/refresh` → simpan access token baru → retry request asli.
 
 Header wajib untuk endpoint protected:
 
@@ -36,11 +39,22 @@ Body error TIDAK dibungkus ApiResponse, bentuknya langsung:
 | Status | Code                  | Meaning                          |
 | ------ | --------------------- | -------------------------------- |
 | 400    | BAD_REQUEST           | Validasi input gagal             |
-| 401    | UNAUTHORIZED          | Belum login / token invalid      |
+| 401    | UNAUTHORIZED          | Belum login / token invalid / token expired |
 | 403    | FORBIDDEN             | Bukan pemilik resource / bukan Dev |
 | 404    | NOT_FOUND             | Resource tidak ada / sudah dihapus |
 | 409    | CONFLICT              | Duplikat (misal username/email)  |
 | 500    | INTERNAL_SERVER_ERROR | Kesalahan server                 |
+
+Pesan error 401 spesifik:
+
+| message                         | Sebab                                  |
+| ------------------------------- | -------------------------------------- |
+| `"access token expired"`        | JWT sudah lewat waktu (15 menit)       |
+| `"invalid access token"`        | Token format tidak valid               |
+| `"invalid token signature"`     | Signature JWT tidak cocok (salah key)  |
+| `"failed to decode access token"` | Error lain saat decode JWT           |
+
+Client harus intercept **semua** 401 lalu refresh token via `POST /auth/refresh`.
 
 ---
 
@@ -129,13 +143,38 @@ Response 200:
 }
 ```
 
-Set-Cookie: `refresh_token=<family>.<token>; HttpOnly; SameSite=Strict; Path=/`
+Set-Cookie: `refresh_token=<family>.<token>; HttpOnly; SameSite=Lax; Path=/`
 
 ### POST /api/v1/auth/refresh
 
 Public, tapi butuh cookie `refresh_token` dari login sebelumnya. Rotasi token: cookie lama invalid.
 
 Response 200: sama seperti login. Set-Cookie: cookie refresh baru.
+
+### POST /api/v1/auth/logout
+
+Protected. Hapus refresh token current session dan clear cookie.
+
+Server melakukan:
+1. Ambil `family_id` dari cookie `refresh_token`.
+2. `DELETE FROM refresh_token WHERE family_id = ...` → token tidak bisa dipakai lagi untuk refresh.
+3. Clear cookie `refresh_token` di response.
+
+Response 200:
+
+```json
+{
+  "data": null,
+  "message": "Logged out"
+}
+```
+
+Set-Cookie: `refresh_token=; Max-Age=0` (hapus cookie).
+
+Setelah logout:
+- Access token yang masih berlaku (sisa waktu hingga 15 menit) **tetap valid** sampai expired — JWT bersifat stateless.
+- Refresh token sudah dihapus dari DB, tidak bisa dipakai untuk `/auth/refresh` lagi — server akan return 401.
+- Login baru akan generate `family_id` baru.
 
 ---
 
@@ -297,6 +336,90 @@ Response 200: satu `Parfume`. 404 jika tidak ada / sudah dihapus.
 Sama seperti brand: fresh → hard delete (batch, bottle, decant ikut); ada riwayat → soft delete.
 
 Response 200, `data: "Berhasil dihapus"`.
+
+### GET /api/v1/parfume/ranking
+
+Ranking parfume berdasarkan revenue + jumlah order. Cocok untuk dashboard "Top Parfume".
+
+Query param (semua optional):
+
+- `frame`: `day` | `week` | `month` | `all` (default `all`)
+- `page`: halaman (default `1`)
+- `per_page`: jumlah item per halaman (default `10`, max `50`)
+
+Aturan:
+- 400 jika `frame` bukan day/week/month/all.
+- Hasil diurutkan dari revenue tertinggi.
+- `rank` dihitung berdasarkan posisi global (misal page 2 rank mulai dari 11).
+
+Contoh: `GET /api/v1/parfume/ranking?frame=week&page=1&per_page=5`
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "parfume_id": "uuid",
+      "parfume_name": "Bleu de Chanel",
+      "brands_name": "Chanel",
+      "total_revenue": "260000.00",
+      "total_cost": "300000.00",
+      "estimated_profit": "-40000.00",
+      "total_orders": 3,
+      "rank": 1
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 5,
+    "total_items": 12,
+    "total_pages": 3
+  },
+  "message": "Succes"
+}
+```
+
+### GET /api/v1/parfume/{id}/history
+
+Time-series revenue per parfume — cocok untuk grafik trend saat user mengklik
+parfume tertentu. Bucket sudah di-fill 0 untuk periode tanpa penjualan.
+
+Query param (semua optional):
+
+- `frame`: `day` | `week` | `month` | `all` (default `day`)
+- `date` (`YYYY-MM-DD`, default hari ini): anchor periode; diabaikan jika `frame=all`
+
+Isi data per frame (sama dengan `/revenue/history`):
+
+| frame | isi bucket                | jumlah titik     |
+|-------|---------------------------|------------------|
+| day   | per jam (00:00-23:00)     | 24 titik         |
+| week  | per hari (Senin-Minggu)   | 7 titik          |
+| month | per hari (tgl 1 - akhir)  | 28-31 titik      |
+| all   | per bulan                 | bebas            |
+
+400 jika `frame` bukan day/week/month/all, 404 jika parfume tidak ditemukan.
+
+Contoh: `GET /api/v1/parfume/{id}/history?frame=week`
+Contoh: `GET /api/v1/parfume/{id}/history?frame=all`
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "period": "2026-08-24T00:00:00Z",
+      "total_revenue": "260000.00",
+      "total_cost": "300000.00",
+      "estimated_profit": "-40000.00",
+      "total_orders": 3
+    }
+  ],
+  "message": "Succes"
+}
+```
 
 ### GET /api/v1/parfume/{id}/batch
 
@@ -574,7 +697,14 @@ harus menulis movement balik `in/refund` dan mengembalikan
 
 ### GET /api/v1/order
 
-History pembelian user (semua order item, terbaru dulu).
+History pembelian user (semua order item, terbaru dulu), dengan pagination
+10 data per halaman.
+
+Query param:
+
+- `page` (optional, default `1`) — nomor halaman, minimal 1.
+
+Contoh: `GET /api/v1/order?page=2`
 
 PENTING: history TIDAK memfilter soft-delete — produk/botol/decant yang
 sudah diarsip tetap muncul di riwayat (nama parfume & brand ikut disertakan).
@@ -598,16 +728,204 @@ Response 200:
       "created_at": "ISO-8601"
     }
   ],
+  "pagination": {
+    "page": 2,
+    "per_page": 10,
+    "total_items": 23,
+    "total_pages": 3
+  },
   "message": "Succes"
 }
 ```
 
 ---
 
+## 10. Revenue (Dashboard)
+
+Semua butuh Bearer token. Semua nilai uang adalah `BigDecimal` (string di JSON).
+
+Definisi penting:
+
+- Hanya order `status = success` yang dihitung.
+- **Revenue** = `SUM(total_price)` order.
+- **Cost** (modal) = prorate harga beli per ml:
+  `(purchase_price / quantity_ml) * size_ml decant * quantity`.
+  Contoh: batch 1.500.000 / 100ml = 15.000 per ml, jual decant 5ml x2 →
+  cost 150.000.
+- **estimated_profit** = revenue - cost. Bisa negatif jika jual di bawah
+  modal. Estimasi: memakai `purchase_price` batch saat ini (jika harga
+  beli batch diedit, profit historis ikut berubah).
+- Batas periode mengikuti timezone server database (saat ini +07 / WIB):
+  `today` = mulang tengah malam WIB, `week` = mulai hari Senin,
+  `month` = tanggal 1.
+- Order history tidak memfilter soft-delete; revenue juga demikian.
+
+### GET /api/v1/revenue/summary
+
+Ringkasan untuk kartu dashboard — satu request untuk semua periode.
+
+Response 200:
+
+```json
+{
+  "data": {
+    "today": {
+      "total_revenue": "260000.00",
+      "total_cost": "300000.00",
+      "estimated_profit": "-40000.00",
+      "total_orders": 3
+    },
+    "week": { "...": "bentuk sama dengan today" },
+    "month": { "...": "bentuk sama dengan today" },
+    "all_time": { "...": "bentuk sama dengan today" }
+  },
+  "message": "Succes"
+}
+```
+
+### GET /api/v1/revenue/daily
+
+Time-series agregat untuk grafik dashboard.
+
+Query param (semua optional):
+
+- `from` (`YYYY-MM-DD`, default 29 hari sebelum `to`)
+- `to` (`YYYY-MM-DD`, default hari ini)
+- `granularity`: `day` | `week` | `month` (default `day`)
+
+Aturan:
+
+- Rentang maksimal 366 hari (400 jika lebih).
+- 400 juga jika `from > to` atau granularity bukan day/week/month.
+- Periode tanpa penjualan TIDAK muncul di response (bukan diisi 0).
+
+Contoh: `GET /api/v1/revenue/daily?from=2026-08-01&to=2026-08-25&granularity=day`
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "period": "2026-08-25",
+      "total_revenue": "260000.00",
+      "total_cost": "300000.00",
+      "estimated_profit": "-40000.00",
+      "total_orders": 3
+    }
+  ],
+  "message": "Succes"
+}
+```
+
+`period` format `YYYY-MM-DD`; untuk granularity `week` berisi tanggal hari
+Senin minggu tsb, untuk `month` berisi tanggal 1 bulan tsb.
+
+### GET /api/v1/revenue/history
+
+Time-series siap pakai untuk graph dashboard per time frame.
+Bedanya dengan `/daily`: bucket sudah di-fill 0 untuk jam/hari/bulan tanpa
+penjualan, jadi FE tinggal plot langsung tanpa olah data.
+
+Query param (semua optional):
+
+- `frame`: `day` | `week` | `month` | `all` (default `day`)
+- `date` (`YYYY-MM-DD`, default hari ini): anchor periode; diabaikan
+  jika `frame=all`
+
+Isi data per frame:
+
+| frame | isi bucket            | jumlah titik          |
+|-------|-----------------------|-----------------------|
+| day   | per jam (00:00-23:00) | 24 titik              |
+| week  | per hari (Senin-Minggu)| 7 titik              |
+| month | per hari (tgl 1 - akhir bulan) | 28-31 titik   |
+| all   | per bulan (bulan order pertama s/d bulan ini) | bebas |
+
+400 jika `frame` bukan day/week/month/all.
+
+Contoh: `GET /api/v1/revenue/history?frame=day`
+Contoh: `GET /api/v1/revenue/history?frame=month&date=2026-08-15`
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "period": "2026-08-26T14:00:00Z",
+      "total_revenue": "260000.00",
+      "total_cost": "300000.00",
+      "estimated_profit": "-40000.00",
+      "total_orders": 3
+    },
+    {
+      "period": "2026-08-26T15:00:00Z",
+      "total_revenue": "0",
+      "total_cost": "0",
+      "estimated_profit": "0",
+      "total_orders": 0
+    }
+  ],
+  "message": "Succes"
+}
+```
+
+`period` ISO-8601 UTC: awal jam untuk `frame=day`, tengah malam untuk
+`week`/`month`, dan tanggal 1 untuk `all`.
+
+---
+
 ## Catatan untuk Frontend
 
 - `BigDecimal` di Rust di-serialize sebagai string di JSON (preserves presisi). Frontend parse via `new BigDecimal(...)` atau pakai library desimal. Jangan cast ke `number` kalau presisi penting (harga, ml).
-- Pakai `fetch` / `axios` dengan `credentials: 'include'` untuk `/auth/refresh` agar cookie terkirim.
+- Pakai `fetch` / `axios` dengan `credentials: 'include'` untuk `/auth/refresh` dan `/auth/logout` agar cookie terkirim.
 - Simpan access token di memory (state) bukan localStorage; refresh lewat endpoint `/auth/refresh`.
+- **Auto-refresh**: Access token expired 15 menit. Client harus intercept response 401 → hit `POST /api/v1/auth/refresh` → simpan access_token baru → retry request asli. Contoh logic:
+  ```javascript
+  // axios interceptor
+  axios.interceptors.response.use(
+    (res) => res,
+    async (err) => {
+      if (err.response?.status === 401 && !err.config._retry) {
+        err.config._retry = true;
+        const { data } = await axios.post('/api/v1/auth/refresh', null, { withCredentials: true });
+        err.config.headers.Authorization = `Bearer ${data.data.access_token}`;
+        return axios(err.config);
+      }
+      return Promise.reject(err);
+    }
+  );
+  ```
+- **Logout**: Hit `POST /api/v1/auth/refresh` → `POST /api/v1/auth/logout` → clear access token dari state → redirect ke login. Cookie `refresh_token` akan di-clear otomatis oleh server.
 - UUID dipakai sebagai path param dan foreign key — pakai `crypto.randomUUID()` untuk generate ID di FE jika perlu placeholder.
-- Bentuk pagination belum ada; list return semua row. Handle limit di FE kalau perlu.
+- Pagination ada di `GET /order` (10/halaman) dan `GET /parfume/ranking` (10/halaman, max 50). List lain return semua row.
+- Revenue/dashboard TIDAK butuh pagination: endpoint `/revenue/*` return angka agregat (bukan daftar order), jadi aman di-request ulang tiap kali dashboard dibuka.
+- Semua time-series (`/revenue/history`, `/parfume/{id}/history`) sudah di-fill 0 untuk periode kosong — tinggal plot langsung.
+
+---
+
+## Ringkasan Endpoint Baru (Dashboard & Analytics)
+
+### Revenue
+
+| Endpoint | Fungsi | Pagination |
+|----------|--------|-----------|
+| `GET /revenue/summary` | Card: today/week/month/all_time | Tidak |
+| `GET /revenue/daily?from=&to=&granularity=` | Time-series bebas rentang | Tidak |
+| `GET /revenue/history?frame=day\|week\|month\|all` | Time-series siap grafik (di-fill 0) | Tidak |
+
+### Parfume
+
+| Endpoint | Fungsi | Pagination |
+|----------|--------|-----------|
+| `GET /parfume` | List semua parfume | Tidak |
+| `GET /parfume/ranking?frame=&page=&per_page=` | Ranking parfume by revenue | **Ya** (default 10, max 50) |
+| `GET /parfume/{id}/history?frame=day\|week\|month\|all` | Time-series revenue per parfume | Tidak |
+
+### Order
+
+| Endpoint | Fungsi | Pagination |
+|----------|--------|-----------|
+| `POST /order` | Buat order penjualan | Tidak |
+| `GET /order?page=` | History order | **Ya** (10/halaman) |

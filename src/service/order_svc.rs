@@ -217,10 +217,14 @@ pub async fn svc_create_order(
     Ok("berhasil".to_string())
 }
 
+pub const ORDER_PER_PAGE: i64 = 10;
+
 pub async fn svc_get_all_order(
     pool: &PgPool,
     access: &AccesClaims,
-) -> Result<Vec<OrderResponse>, AppError> {
+    page: i64,
+    per_page: i64,
+) -> Result<(Vec<OrderResponse>, i64), AppError> {
     let uuid = match Uuid::parse_str(&access.sub) {
         Ok(val) => val,
         Err(_) => {
@@ -230,6 +234,29 @@ pub async fn svc_get_all_order(
             ));
         }
     };
+
+    let offset = page.saturating_sub(1).saturating_mul(per_page);
+
+    let total_items = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) AS "count!"
+        FROM order_items oi
+        JOIN batch_parfume_bottle bf
+            ON bf.id = oi.bottle_id
+        JOIN batch_parfume bp
+            ON bp.id = bf.batch_parfume_id
+        JOIN parfume p
+            ON p.id = bp.parfume_id
+        JOIN brands br
+            ON br.id = p.brands_id
+        JOIN decant d
+            ON d.id = oi.decant_id
+        WHERE br.owner_id = $1
+        "#,
+        uuid
+    )
+    .fetch_one(pool)
+    .await?;
 
     let res = sqlx::query_as!(
         OrderResponse,
@@ -259,11 +286,14 @@ pub async fn svc_get_all_order(
             ON d.id = oi.decant_id
         WHERE br.owner_id = $1
         ORDER BY oi.created_at DESC
+        LIMIT $2 OFFSET $3
         "#,
-        uuid
+        uuid,
+        per_page,
+        offset
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(res)
+    Ok((res, total_items))
 }

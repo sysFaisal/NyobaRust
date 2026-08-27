@@ -5,3 +5,4 @@ pub mod decant;
 pub mod batch;
 pub mod bottle;
 pub mod order;
+pub mod revenue;

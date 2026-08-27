@@ -13,8 +13,9 @@ use crate::c_auth::refresh_token::{AccesClaims, RoleModel};
 use crate::dto::ApiResponse;
 use crate::dto::request::user_req::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::user_res::{LoginResponse, UserProfile};
+use time::OffsetDateTime;
 use crate::error::error::AppError;
-use crate::service::user_svc::{self, svc_refresh_token};
+use crate::service::user_svc::{self, svc_refresh_token, svc_logout};
 
 /*
 Untuk i5-6200U, saya akan coba benchmark begini
@@ -135,16 +136,25 @@ pub async fn login_user(
 ) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<LoginResponse>>), AppError> {
     let (refresh_cookie_value, expire_at, jwt) = svc_login_user(&state.db, &payload).await?;
 
-    let cookie = Cookie::build(("refresh_token", refresh_cookie_value))
+    let new_cookie = Cookie::build(("refresh_token", refresh_cookie_value))
         .http_only(true)
         .secure(false)
-        .same_site(SameSite::Strict)
+        .same_site(SameSite::Lax)
         .path("/")
         .expires(Expiration::DateTime(expire_at))
         .build();
 
+    let remove_cookie = Cookie::build(("refresh_token", ""))
+        .http_only(true)
+        .secure(false)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::seconds(-1))
+        .build();
+
     let mut header = HeaderMap::new();
-    header.insert(SET_COOKIE, cookie.to_string().parse().unwrap());
+    header.append(SET_COOKIE, remove_cookie.to_string().parse().unwrap());
+    header.append(SET_COOKIE, new_cookie.to_string().parse().unwrap());
 
     Ok((
         StatusCode::OK,
@@ -162,7 +172,7 @@ pub async fn login_user(
 pub async fn refresh_token(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<(StatusCode, CookieJar, Json<ApiResponse<LoginResponse>>), AppError> {
+) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<LoginResponse>>), AppError> {
     let cookie = jar.get("refresh_token").ok_or(AppError::BadRequest(
         None,
         Some("refresh_token: cookie refresh_token tidak ada di request".to_string()),
@@ -177,21 +187,64 @@ pub async fn refresh_token(
     let new_cookie = Cookie::build(("refresh_token", new_cookie_value))
         .http_only(true)
         .secure(false)
-        .same_site(SameSite::Strict)
+        .same_site(SameSite::Lax)
         .path("/")
+        .expires(Expiration::DateTime(OffsetDateTime::now_utc() + time::Duration::days(7)))
         .build();
 
-    let new_jar = jar.add(new_cookie);
+    let remove_cookie = Cookie::build(("refresh_token", ""))
+        .http_only(true)
+        .secure(false)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::seconds(-1))
+        .build();
+
+    let mut header = HeaderMap::new();
+    header.append(SET_COOKIE, remove_cookie.to_string().parse().unwrap());
+    header.append(SET_COOKIE, new_cookie.to_string().parse().unwrap());
 
     Ok((
         StatusCode::OK,
-        new_jar,
+        header,
         Json(ApiResponse {
             data: LoginResponse {
                 access_token: new_access_token,
                 token_type: "Bearer".to_string(),
             },
             message: Some("Success".to_string()),
+        }),
+    ))
+}
+
+pub async fn logout_user(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<()>>), AppError> {
+    if let Some(cookie) = jar.get("refresh_token") {
+        let cookie_value = cookie.value();
+        if let Some((family_id, _)) = cookie_value.split_once('.') {
+            let _ = svc_logout(&state.db, family_id).await;
+        }
+    }
+
+    let expired_cookie = Cookie::build(("refresh_token", ""))
+        .http_only(true)
+        .secure(false)
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::seconds(-1))
+        .build();
+
+    let mut header = HeaderMap::new();
+    header.insert(SET_COOKIE, expired_cookie.to_string().parse().unwrap());
+
+    Ok((
+        StatusCode::OK,
+        header,
+        Json(ApiResponse {
+            data: (),
+            message: Some("Logged out".to_string()),
         }),
     ))
 }

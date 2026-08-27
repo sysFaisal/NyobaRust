@@ -6,13 +6,15 @@ use crate::handlers::brand::{
     create_brands, delete_brands, get_all_brands, get_brands_by_id, update_brands,
 };
 use crate::handlers::decant::{create_decant, delete_decant, get_all_decant, update_decant};
+use crate::handlers::order::{create_order, get_all_order};
 use crate::handlers::parfume::{
     create_parfum, delete_parfume, get_all_parfume, get_all_parfume_uni, get_parfume_by_id,
+    get_parfume_history, get_parfume_ranking,
 };
-use crate::handlers::order::{create_order, get_all_order};
+use crate::handlers::revenue::{get_daily_revenue, get_revenue_history, get_revenue_summary};
 use crate::handlers::user::{
-    create_user, delete_data_user, get_all_user, get_user_by_id, login_user, refresh_token,
-    update_user,
+    create_user, delete_data_user, get_all_user, get_user_by_id, login_user, logout_user,
+    refresh_token, update_user,
 };
 use crate::service::brands_svc::svc_get_all_brands;
 use crate::service::user_svc::auth_middleware;
@@ -33,6 +35,7 @@ pub fn auth_user() -> Router<AppState> {
         .route("/register", post(create_user))
         .route("/login", post(login_user))
         .route("/refresh", post(refresh_token))
+        .route("/logout", post(logout_user))
 }
 
 pub fn route_user_protected() -> Router<AppState> {
@@ -72,12 +75,11 @@ pub fn router_brands() -> Router<AppState> {
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
         .route("/", post(create_parfum).get(get_all_parfume_uni))
-        .route(
-            "/{id}",
-            get(get_parfume_by_id).delete(delete_parfume),
-        )
+        .route("/{id}", get(get_parfume_by_id).delete(delete_parfume))
         .route("/{id}/batch", get(get_all_batch).post(create_batch))
         .route("/{id}/decant", get(get_all_decant).post(create_decant))
+        .route("/{id}/history", get(get_parfume_history))
+        .route("/ranking", get(get_parfume_ranking))
         .layer(middleware::from_fn(auth_middleware))
 }
 
@@ -109,6 +111,14 @@ pub fn router_order() -> Router<AppState> {
         .layer(middleware::from_fn(auth_middleware))
 }
 
+pub fn router_revenue() -> Router<AppState> {
+    Router::new()
+        .route("/summary", get(get_revenue_summary))
+        .route("/daily", get(get_daily_revenue))
+        .route("/history", get(get_revenue_history))
+        .layer(middleware::from_fn(auth_middleware))
+}
+
 pub async fn create_route(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1/auth", auth_user())
@@ -119,5 +129,6 @@ pub async fn create_route(state: AppState) -> Router {
         .nest("/api/v1/bottle", router_bottle())
         .nest("/api/v1/decant", router_decant())
         .nest("/api/v1/order", router_order())
+        .nest("/api/v1/revenue", router_revenue())
         .with_state(state)
 }

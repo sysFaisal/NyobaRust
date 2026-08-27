@@ -1,14 +1,22 @@
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use uuid::Uuid;
 
 use crate::{
     c_auth::refresh_token::AccesClaims, dto::{
-        ApiResponse, request::parfume_req::CreateParfume, response::parfume_res::ParfumeResponse,
-    }, error::error::AppError, service::parfume_svc::{svc_create_parfume, svc_delete_parfume, svc_get_all_parfume, svc_get_all_parfume_uni, svc_get_parfume_by_id}, state::AppState,
+        ApiResponse, PaginatedResponse, PaginationMeta,
+        request::{
+            parfume_req::{CreateParfume, RankingQuery},
+            revenue_req::RevenueHistoryQuery,
+        },
+        response::{
+            parfume_res::{ParfumeRankingPoint, ParfumeResponse},
+            revenue_res::RevenueHistoryPoint,
+        },
+    }, error::error::AppError, service::parfume_svc::{svc_create_parfume, svc_delete_parfume, svc_get_all_parfume, svc_get_all_parfume_uni, svc_get_parfume_by_id, svc_get_parfume_history, svc_get_parfume_ranking, RANKING_DEFAULT_PER_PAGE}, state::AppState,
 };
 
 pub async fn create_parfum(
@@ -86,6 +94,49 @@ pub async fn delete_parfume(
         Json(ApiResponse {
             data: result,
             message: None,
+        }),
+    ))
+}
+
+pub async fn get_parfume_ranking(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Query(query): Query<RankingQuery>,
+) -> Result<(StatusCode, Json<PaginatedResponse<ParfumeRankingPoint>>), AppError> {
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(RANKING_DEFAULT_PER_PAGE);
+    let (res, total_items) = svc_get_parfume_ranking(&state.db, &access, &query).await?;
+
+    let total_pages = (total_items + per_page - 1) / per_page;
+
+    Ok((
+        StatusCode::OK,
+        Json(PaginatedResponse {
+            data: res,
+            pagination: PaginationMeta {
+                page,
+                per_page,
+                total_items,
+                total_pages,
+            },
+            message: Some("Succes".to_string()),
+        }),
+    ))
+}
+
+pub async fn get_parfume_history(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<RevenueHistoryQuery>,
+) -> Result<(StatusCode, Json<ApiResponse<Vec<RevenueHistoryPoint>>>), AppError> {
+    let res = svc_get_parfume_history(&state.db, &access, &id, &query).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: res,
+            message: Some("Succes".to_string()),
         }),
     ))
 }

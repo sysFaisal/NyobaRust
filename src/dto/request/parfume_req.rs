@@ -19,3 +19,10 @@ pub struct UpdateParfume {
     pub concrentration: Option<Option<String>>,
     pub description: Option<Option<String>>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RankingQuery {
+    pub frame: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}

@@ -12,7 +12,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use chrono::Utc;
 use hickory_resolver::TokioResolver;
-use jsonwebtoken::{DecodingKey, decode};
+use jsonwebtoken::{DecodingKey, errors::ErrorKind, decode};
 use sqlx::PgPool;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -326,6 +326,22 @@ pub async fn svc_refresh_token(
     Ok((new_access_token, new_cookie_value))
 }
 
+pub async fn svc_logout(pool: &PgPool, family_id: &str) -> Result<(), AppError> {
+    let family_uuid = Uuid::parse_str(family_id).map_err(|_| {
+        AppError::BadRequest(None, Some("svc_logout: family_id tidak valid".to_string()))
+    })?;
+
+    sqlx::query!(
+        r#"DELETE FROM refresh_token WHERE family_id = $1"#,
+        family_uuid
+    )
+    .execute(pool)
+    .await?;
+
+    info!(family_id = %family_uuid, "refresh token deleted on logout");
+    Ok(())
+}
+
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {
     let auth = match req.headers().get(axum::http::header::AUTHORIZATION) {
         Some(val) => val,
@@ -361,10 +377,18 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
         &jsonwebtoken::Validation::default(),
     ) {
         Ok(val) => val.claims,
-        Err(_) => return Err(AppError::BadRequest(
-            Some("dwdw".to_string()),
-            Some("auth_middleware: gagal decode JWT access token".to_string()),
-        )),
+        Err(e) => {
+            let msg = match e.kind() {
+                ErrorKind::ExpiredSignature => "access token expired",
+                ErrorKind::InvalidToken => "invalid access token",
+                ErrorKind::InvalidSignature => "invalid token signature",
+                _ => "failed to decode access token",
+            };
+            return Err(AppError::Unauthorized(
+                Some(msg.to_string()),
+                Some(format!("auth_middleware: {}", msg)),
+            ));
+        }
     };
 
     req.extensions_mut().insert(claims);

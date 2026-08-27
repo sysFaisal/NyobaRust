@@ -59,7 +59,7 @@ pub fn generate_access_token(user_id: Uuid, role: &RoleModel) -> Result<String, 
         sub: user_id.to_string(),
         role: role.clone(),
         iat: now.timestamp(),
-        exp: (now + Duration::minutes(5)).timestamp(), //5 menit
+        exp: (now + Duration::minutes(15)).timestamp(), //15 menit
     };
 
     let secret = get_jwt_secret()?;
