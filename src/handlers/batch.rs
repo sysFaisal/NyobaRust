@@ -22,14 +22,14 @@ pub async fn create_batch(
     Extension(access): Extension<AccesClaims>,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateBatch>,
-) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<BatchResponse>>), AppError> {
     let create = svc_create_batch(&appstate.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
-            data: (),
-            message: Some(create),
+            data: create,
+            message: Some("Created Batch".to_string()),
         }),
     ))
 }
@@ -55,14 +55,14 @@ pub async fn update_batch(
     Extension(access): Extension<AccesClaims>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBatch>,
-) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<BatchResponse>>), AppError> {
     let res = svc_update_batch(&state.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
             data: res,
-            message: None,
+            message: Some("Berhasil".to_string()),
         }),
     ))
 }

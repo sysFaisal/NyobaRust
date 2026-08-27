@@ -71,7 +71,7 @@ pub async fn svc_create_parfume(
     pool: &PgPool,
     req: &CreateParfume,
     access: &AccesClaims,
-) -> Result<String, AppError> {
+) -> Result<ParfumeResponse, AppError> {
     if !validate_string(&req.name, true, 3) {
         return Err(AppError::BadRequest(
             None,
@@ -118,41 +118,150 @@ pub async fn svc_create_parfume(
             ));
         }
     };
-    let result = sqlx::query!(
+
+    let res = sqlx::query_as!(
+        ParfumeResponse,
         r#"
-    INSERT INTO parfume (
-        brands_id,
-        name,
-        concentration,
-        description
-    )
-    SELECT
-        b.id,
-        $3,
-        $4,
-        $5
-    FROM brands b
-    WHERE b.id = $1
-      AND b.owner_id = $2
-      AND b.deleted_at IS NULL
-    "#,
+        WITH inserted AS (
+            INSERT INTO parfume (
+                brands_id,
+                name,
+                concentration,
+                description
+            )
+            SELECT
+                b.id,
+                $3,
+                $4,
+                $5
+            FROM brands b
+            WHERE b.id = $1
+              AND b.owner_id = $2
+              AND b.deleted_at IS NULL
+            RETURNING
+                id,
+                brands_id,
+                name,
+                concentration,
+                description
+        )
+        SELECT
+            i.id,
+            i.brands_id,
+            b.name AS "brands_name!",
+            i.name,
+            i.concentration,
+            i.description
+        FROM inserted i
+        JOIN brands b ON b.id = i.brands_id
+        "#,
         req.brands_id,
         uuid,
         req.name.trim(),
         concentration,
         desc,
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
 
-    if result.rows_affected() == 0 {
-        return Err(AppError::Forbidden(
-            None,
-            Some("svc_create_parfume: brands_id bukan milik user ini".to_string()),
-        ));
-    }
+    let parfume = match res {
+        Some(val) => val,
+        None => {
+            return Err(AppError::Forbidden(
+                None,
+                Some("svc_create_parfume: brands_id bukan milik user ini".to_string()),
+            ));
+        }
+    };
 
-    Ok("Parfume created successfully".to_string())
+    Ok(parfume)
+}
+
+pub async fn svc_update_parfume(
+    pool: &PgPool,
+    req: &crate::dto::request::parfume_req::UpdateParfume,
+    access: &AccesClaims,
+    id: &Uuid,
+) -> Result<ParfumeResponse, AppError> {
+    let uuid = match Uuid::parse_str(access.sub.as_str()) {
+        Ok(val) => val,
+        Err(_) => {
+            return Err(AppError::InternalServerError(
+                None,
+                Some("svc_update_parfume: gagal parse UUID dari claims".to_string()),
+            ));
+        }
+    };
+
+    let concentration = match &req.concrentration {
+        Some(Some(val)) => {
+            if !validate_string(&val, true, 3) {
+                return Err(AppError::BadRequest(
+                    None,
+                    Some("svc_update_parfume: concentration kurang dari 3 karakter".to_string()),
+                ));
+            }
+            Some(val.trim().to_string())
+        }
+        Some(None) => None,
+        None => None,
+    };
+
+    let desc = match &req.description {
+        Some(Some(val)) => {
+            if !validate_string(&val, true, 3) {
+                return Err(AppError::BadRequest(
+                    None,
+                    Some("svc_update_parfume: description kurang dari 3 karakter".to_string()),
+                ));
+            }
+            Some(val.trim().to_string())
+        }
+        Some(None) => None,
+        None => None,
+    };
+
+    let parfume = sqlx::query_as!(
+        ParfumeResponse,
+        r#"
+        UPDATE parfume p
+        SET name = COALESCE($3, p.name),
+            concentration = COALESCE($4, p.concentration),
+            description = COALESCE($5, p.description)
+        FROM brands b
+        WHERE p.id = $1
+          AND b.id = p.brands_id
+          AND b.owner_id = $2
+          AND p.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+        RETURNING
+            p.id,
+            p.brands_id,
+            b.name AS "brands_name!",
+            p.name,
+            p.concentration,
+            p.description
+        "#,
+        id,
+        uuid,
+        req.name.as_ref().map(|s| s.trim()),
+        concentration,
+        desc,
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let parfume = match parfume {
+        Some(val) => val,
+        None => {
+            return Err(AppError::NotFound(
+                None,
+                Some("svc_update_parfume: parfume tidak ditemukan".to_string()),
+            ));
+        }
+    };
+
+    Ok(parfume)
 }
 
 pub async fn svc_get_all_parfume_uni(

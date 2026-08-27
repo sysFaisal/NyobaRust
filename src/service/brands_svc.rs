@@ -16,7 +16,7 @@ pub async fn svc_create_brands(
     pool: &PgPool,
     req: &CreateBrands,
     access: &AccesClaims,
-) -> Result<String, AppError> {
+) -> Result<Brand, AppError> {
     let name = req.name_brands.trim();
 
     if name.is_empty() {
@@ -46,15 +46,23 @@ pub async fn svc_create_brands(
         }
     };
 
-    let result = sqlx::query!(
-        r#"INSERT INTO brands (owner_id, name) VALUES ($1, $2)"#,
+    let brand = sqlx::query_as!(
+        Brand,
+        r#"
+        INSERT INTO brands (owner_id, name)
+        VALUES ($1, $2)
+        RETURNING
+            id,
+            name,
+            0 AS "total_parfume!"
+        "#,
         owner_uuid,
         name
     )
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    Ok("Success".to_string())
+    Ok(brand)
 }
 
 pub async fn svc_get_all_brands(
@@ -95,7 +103,7 @@ pub async fn svc_update_brands(
     req: &UpdateBrands,
     access: &AccesClaims,
     id: &Uuid,
-) -> Result<String, AppError> {
+) -> Result<Brand, AppError> {
     if id != &req.brands_id {
         return Err(AppError::Forbidden(
             None,
@@ -113,27 +121,35 @@ pub async fn svc_update_brands(
         }
     };
 
-    let result = sqlx::query!(
+    let brand = sqlx::query_as!(
+        Brand,
         r#"
         UPDATE brands
         SET name = $1
         WHERE id = $2 AND owner_id = $3 AND deleted_at IS NULL
+        RETURNING
+            id,
+            name,
+            (SELECT COUNT(p.id)::INT FROM parfume p WHERE p.brands_id = brands.id AND p.deleted_at IS NULL) AS "total_parfume!"
         "#,
         req.name_brands,
         &req.brands_id,
         uuid
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
 
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(
-            None,
-            Some("svc_update_brands: brand tidak ditemukan".to_string()),
-        ));
-    }
+    let brand = match brand {
+        Some(val) => val,
+        None => {
+            return Err(AppError::NotFound(
+                None,
+                Some("svc_update_brands: brand tidak ditemukan".to_string()),
+            ));
+        }
+    };
 
-    Ok("Berhasil".to_string())
+    Ok(brand)
 }
 
 pub async fn svc_get_brands_by_id(

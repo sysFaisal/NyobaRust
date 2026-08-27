@@ -29,7 +29,7 @@ pub enum MovementReason {
 
 
 
-pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &AccesClaims, batch_id: &Uuid) -> Result<String, AppError> {
+pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &AccesClaims, batch_id: &Uuid) -> Result<BotolResponse, AppError> {
 
     if &req.batch_id != batch_id {
         return Err(AppError::Forbidden(
@@ -86,24 +86,37 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
 
     let mut tx = pool.begin().await?;
 
-    let inserted = sqlx::query!(
+    let bottle = sqlx::query_as!(
+        BotolResponse,
         r#"
-        INSERT INTO batch_parfume_bottle (
-            batch_parfume_id,
-            remaining_ml,
-            status
+        WITH inserted AS (
+            INSERT INTO batch_parfume_bottle (
+                batch_parfume_id,
+                remaining_ml,
+                status
+            )
+            SELECT
+                bf.id,
+                $2,
+                $3
+            FROM batch_parfume bf JOIN parfume f
+                ON bf.parfume_id = f.id
+            JOIN brands b
+                ON f.brands_id = b.id
+            WHERE b.owner_id = $4
+              AND bf.id = $1
+            RETURNING
+                id,
+                batch_parfume_id,
+                remaining_ml,
+                status
         )
         SELECT
-            bf.id,
-            $2,
-            $3
-        FROM batch_parfume bf JOIN parfume f
-            ON bf.parfume_id = f.id
-        JOIN brands b
-            ON f.brands_id = b.id
-        WHERE b.owner_id = $4
-          AND bf.id = $1
-        RETURNING id
+            i.id,
+            i.batch_parfume_id,
+            i.remaining_ml,
+            i.status AS "status: BottleStatus"
+        FROM inserted i
         "#,
         req.batch_id,
         req.remaining_ml,
@@ -133,7 +146,7 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
         VALUES ($1, $2, $3, $4, $5)
         "#,
         order_item_id,
-        inserted.id,
+        bottle.id,
         req.remaining_ml,
         MovementType::In as MovementType,
         MovementReason::Initial as MovementReason,
@@ -143,7 +156,7 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
 
     tx.commit().await?;
 
-    Ok("Created Bottle".to_string())
+    Ok(bottle)
 }
 
 fn access_uuid(access: &AccesClaims, operation: &str) -> Result<Uuid, AppError> {
@@ -195,11 +208,12 @@ pub async fn svc_update_bottle(
     access: &AccesClaims,
     id: &Uuid,
     req: &UpdateBottle,
-) -> Result<String, AppError> {
+) -> Result<BotolResponse, AppError> {
     let owner_id = access_uuid(access, "svc_update_bottle")?;
 
     let Some(new_ml) = &req.remaining_ml else {
-        let result = sqlx::query!(
+        let bottle = sqlx::query_as!(
+            BotolResponse,
             r#"
             UPDATE batch_parfume_bottle bf
             SET status = COALESCE($1, bf.status)
@@ -212,19 +226,27 @@ pub async fn svc_update_bottle(
               AND bp.deleted_at IS NULL
               AND p.deleted_at IS NULL
               AND b.deleted_at IS NULL
+            RETURNING
+                bf.id,
+                bf.batch_parfume_id,
+                bf.remaining_ml,
+                bf.status AS "status: BottleStatus"
             "#,
             req.status as Option<BottleStatus>,
             id,
             owner_id
         )
-        .execute(pool)
+        .fetch_optional(pool)
         .await?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound(None, Some("svc_update_bottle: bottle tidak ditemukan".to_string())));
-        }
+        let bottle = match bottle {
+            Some(val) => val,
+            None => {
+                return Err(AppError::NotFound(None, Some("svc_update_bottle: bottle tidak ditemukan".to_string())));
+            }
+        };
 
-        return Ok("Berhasil".to_string());
+        return Ok(bottle);
     };
 
     if *new_ml <= BigDecimal::from(0) {
@@ -274,19 +296,32 @@ pub async fn svc_update_bottle(
         ));
     }
 
-    sqlx::query!(
+    let bottle = sqlx::query_as!(
+        BotolResponse,
         r#"
         UPDATE batch_parfume_bottle bf
         SET remaining_ml = COALESCE($1, bf.remaining_ml),
             status = COALESCE($2, bf.status)
         WHERE bf.id = $3
+        RETURNING
+            bf.id,
+            bf.batch_parfume_id,
+            bf.remaining_ml,
+            bf.status AS "status: BottleStatus"
         "#,
         req.remaining_ml,
         req.status as Option<BottleStatus>,
         id
     )
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
+
+    let bottle = match bottle {
+        Some(val) => val,
+        None => {
+            return Err(AppError::NotFound(None, Some("svc_update_bottle: bottle tidak ditemukan".to_string())));
+        }
+    };
 
     let delta = new_ml - &cap.remaining_ml;
 
@@ -323,7 +358,7 @@ pub async fn svc_update_bottle(
 
     tx.commit().await?;
 
-    Ok("Berhasil".to_string())
+    Ok(bottle)
 }
 
 pub async fn svc_delete_bottle(

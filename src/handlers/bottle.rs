@@ -20,14 +20,14 @@ pub async fn create_bottle(
     Extension(access): Extension<AccesClaims>,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateBottle>,
-) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<BotolResponse>>), AppError> {
     let create = svc_create_bottle(&state.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
-            data: (),
-            message: Some(create),
+            data: create,
+            message: Some("Created Bottle".to_string()),
         }),
     ))
 
@@ -54,14 +54,14 @@ pub async fn update_bottle(
     Extension(access): Extension<AccesClaims>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBottle>,
-) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<BotolResponse>>), AppError> {
     let result = svc_update_bottle(&state.db, &access, &id, &req).await?;
 
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
             data: result,
-            message: None,
+            message: Some("Berhasil".to_string()),
         }),
     ))
 }

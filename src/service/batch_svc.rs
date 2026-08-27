@@ -33,7 +33,7 @@ pub async fn svc_create_batch(
     req: &CreateBatch,
     access: &AccesClaims,
     id: &Uuid,
-) -> Result<String, AppError> {
+) -> Result<BatchResponse, AppError> {
     if req.quantity_ml <= BigDecimal::from(0) {
         return Err(AppError::BadRequest(
             Some("quantity_ml harus lebih dari 0".to_string()),
@@ -50,41 +50,59 @@ pub async fn svc_create_batch(
             ));
         }
     };
-    let query = sqlx::query!(
+
+    let batch = sqlx::query_as!(
+        BatchResponse,
         r#"
-    INSERT INTO batch_parfume (
-        parfume_id,
-        quantity_ml,
-        purchase_price
-    )
-    SELECT
-        f.id,
-        $3,
-        $4
-    FROM parfume f
-    JOIN brands b
-        ON f.brands_id = b.id
-    WHERE f.id = $1
-      AND b.owner_id = $2
-      AND f.deleted_at IS NULL
-      AND b.deleted_at IS NULL
-    "#,
+        WITH inserted AS (
+            INSERT INTO batch_parfume (
+                parfume_id,
+                quantity_ml,
+                purchase_price
+            )
+            SELECT
+                f.id,
+                $3,
+                $4
+            FROM parfume f
+            JOIN brands b
+                ON f.brands_id = b.id
+            WHERE f.id = $1
+              AND b.owner_id = $2
+              AND f.deleted_at IS NULL
+              AND b.deleted_at IS NULL
+            RETURNING
+                id,
+                parfume_id,
+                quantity_ml,
+                purchase_price
+        )
+        SELECT
+            i.id,
+            i.parfume_id,
+            i.quantity_ml,
+            i.purchase_price
+        FROM inserted i
+        "#,
         id,
         uuid,
         req.quantity_ml,
         req.purchase_price
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
 
-    if query.rows_affected() == 0 {
-        return Err(AppError::InternalServerError(
-            Some("Batch not found".to_string()),
-            Some("svc_create_batch: parfume_id tidak ditemukan / bukan milik user".to_string()),
-        ));
+    let batch = match batch {
+        Some(val) => val,
+        None => {
+            return Err(AppError::InternalServerError(
+                Some("Batch not found".to_string()),
+                Some("svc_create_batch: parfume_id tidak ditemukan / bukan milik user".to_string()),
+            ));
+        }
     };
 
-    Ok("Created Batch".to_string())
+    Ok(batch)
 }
 
 pub async fn svc_get_all_batch(
@@ -135,7 +153,7 @@ pub async fn svc_update_batch(
     req: &UpdateBatch,
     access: &AccesClaims,
     id: &Uuid,
-) -> Result<String, AppError> {
+) -> Result<BatchResponse, AppError> {
 
     let uuid = match Uuid::parse_str(access.sub.as_str()) {
         Ok(val) => val,
@@ -197,28 +215,37 @@ pub async fn svc_update_batch(
         None => &batch.purchase_price,
     };
 
-    let result = sqlx::query!(
+    let batch = sqlx::query_as!(
+        BatchResponse,
         r#"
         UPDATE batch_parfume
         SET quantity_ml = $1,
             purchase_price = $2
         WHERE id = $3
+        RETURNING
+            id,
+            parfume_id,
+            quantity_ml,
+            purchase_price
         "#,
         quantity_ml,
         purchase_price,
         id
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
 
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(
-            None,
-            Some("svc_update_batch: batch tidak ditemukan".to_string()),
-        ));
-    }
+    let batch = match batch {
+        Some(val) => val,
+        None => {
+            return Err(AppError::NotFound(
+                None,
+                Some("svc_update_batch: batch tidak ditemukan".to_string()),
+            ));
+        }
+    };
 
-    Ok("Berhasil".to_string())
+    Ok(batch)
 }
 
 pub async fn svc_delete_batch(

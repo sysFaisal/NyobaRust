@@ -1,10 +1,9 @@
 use crate::env::{get_database_url, init};
 use crate::route::route::create_route;
 use hickory_resolver::TokioResolver;
-use hyper::header::{HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use hyper::Method;
+use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderName, HeaderValue};
 use jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER;
-use sqlx::PgPool;
 use tower_http::cors::{AllowHeaders, Any, CorsLayer};
 use tracing_subscriber::EnvFilter;
 
@@ -46,7 +45,7 @@ async fn main() {
         }
     };
 
-// Configure CORS to allow requests from localhost:3000 and 192.168.0.101:3000 with credentials
+    // Configure CORS to allow requests from localhost:3000 and 192.168.0.101:3000 with credentials
     let cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:3000".parse::<HeaderValue>().unwrap(),
@@ -61,11 +60,7 @@ async fn main() {
             Method::OPTIONS,
             Method::HEAD,
         ])
-        .allow_headers(AllowHeaders::list([
-            CONTENT_TYPE,
-            AUTHORIZATION,
-            ACCEPT,
-        ]))
+        .allow_headers(AllowHeaders::list([CONTENT_TYPE, AUTHORIZATION, ACCEPT]))
         .allow_credentials(true);
 
     let dns = TokioResolver::builder_tokio()

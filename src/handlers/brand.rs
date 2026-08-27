@@ -18,14 +18,14 @@ pub async fn create_brands(
     State(state): State<AppState>,
     Extension(access): Extension<AccesClaims>,
     Json(req): Json<CreateBrands>,
-) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<Brand>>), AppError> {
     let create = svc_create_brands(&state.db, &req, &access).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
-            data: (),
-            message: Some(create),
+            data: create,
+            message: Some("Success".to_string()),
         }),
     ))
 }
@@ -50,14 +50,14 @@ pub async fn update_brands(
     Extension(access): Extension<AccesClaims>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBrands>,
-) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<Brand>>), AppError> {
     let res = svc_update_brands(&state.db, &req, &access, &id).await?;
 
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
             data: res,
-            message: None,
+            message: Some("Berhasil".to_string()),
         }),
     ))
 }

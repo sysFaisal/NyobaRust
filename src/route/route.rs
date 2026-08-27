@@ -9,7 +9,7 @@ use crate::handlers::decant::{create_decant, delete_decant, get_all_decant, upda
 use crate::handlers::order::{create_order, get_all_order};
 use crate::handlers::parfume::{
     create_parfum, delete_parfume, get_all_parfume, get_all_parfume_uni, get_parfume_by_id,
-    get_parfume_history, get_parfume_ranking,
+    get_parfume_history, get_parfume_ranking, update_parfume,
 };
 use crate::handlers::revenue::{get_daily_revenue, get_revenue_history, get_revenue_summary};
 use crate::handlers::user::{
@@ -75,7 +75,7 @@ pub fn router_brands() -> Router<AppState> {
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
         .route("/", post(create_parfum).get(get_all_parfume_uni))
-        .route("/{id}", get(get_parfume_by_id).delete(delete_parfume))
+        .route("/{id}", get(get_parfume_by_id).patch(update_parfume).delete(delete_parfume))
         .route("/{id}/batch", get(get_all_batch).post(create_batch))
         .route("/{id}/decant", get(get_all_decant).post(create_decant))
         .route("/{id}/history", get(get_parfume_history))

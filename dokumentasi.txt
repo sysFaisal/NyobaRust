@@ -255,7 +255,18 @@ Response 200:
 { "name_brands": "string (min 3)" }
 ```
 
-Response 201, `data: null`.
+Response 201: `Brand` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "name": "string",
+    "total_parfume": 0
+  },
+  "message": "Success"
+}
+```
 
 ### GET /api/v1/brands/{id}
 
@@ -272,7 +283,18 @@ Response 200: satu `Brand`.
 
 Field `brands_id` harus sama dengan `{id}` di path.
 
-Response 200, `data: "Berhasil"`.
+Response 200: `Brand` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "name": "string",
+    "total_parfume": 0
+  },
+  "message": "Berhasil"
+}
+```
 
 ### DELETE /api/v1/brands/{id}
 
@@ -325,11 +347,54 @@ List SEMUA parfume milik user lintas brand.
 
 Catatan: nama field memang `concrentration` (typo bawaan, dipertahankan demi kompatibilitas).
 
-Response 201.
+Response 201: `Parfume` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "brands_id": "uuid",
+    "brands_name": "string",
+    "name": "string",
+    "concentration": "string|null",
+    "description": "string|null"
+  },
+  "message": "Parfume created successfully"
+}
+```
 
 ### GET /api/v1/parfume/{id}
 
 Response 200: satu `Parfume`. 404 jika tidak ada / sudah dihapus.
+
+### PATCH /api/v1/parfume/{id}
+
+Semua field optional.
+
+```json
+{
+  "brands_id": "uuid?",
+  "name": "string (min 3)?",
+  "concrentration": "string|null?",
+  "description": "string|null?"
+}
+```
+
+Response 200: `Parfume` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "brands_id": "uuid",
+    "brands_name": "string",
+    "name": "string",
+    "concentration": "string|null",
+    "description": "string|null"
+  },
+  "message": "Berhasil"
+}
+```
 
 ### DELETE /api/v1/parfume/{id}
 
@@ -454,7 +519,19 @@ Response 200:
 
 400 jika `quantity_ml <= 0` atau brand/parfume tidak valid.
 
-Response 201.
+Response 201: `BatchResponse` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "parfume_id": "uuid",
+    "quantity_ml": "decimal",
+    "purchase_price": "decimal"
+  },
+  "message": "Created Batch"
+}
+```
 
 ### GET /api/v1/parfume/{id}/decant
 
@@ -506,7 +583,18 @@ Semua butuh Bearer token.
 
 Aturan: `quantity_ml` baru tidak boleh lebih kecil dari `remaining_ml` botol terbesar dalam batch tsb (400 jika melanggar).
 
-Response 200, `data: "Berhasil"`.
+Response 200: `BatchResponse` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "parfume_id": "uuid",
+    "quantity_ml": "decimal",
+    "purchase_price": "decimal"
+  },
+  "message": "Berhasil"
+}
 
 ### DELETE /api/v1/batch/{id}
 
@@ -531,7 +619,19 @@ Field `batch_id` harus sama dengan `{id}` di path (validasi server).
 
 Server otomatis mencatat stock movement `in/initial` sebesar `remaining_ml`.
 
-Response 201, `message: "Created Bottle"`.
+Response 201: `BotolResponse` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "batch_parfume_id": "uuid",
+    "remaining_ml": "decimal",
+    "status": "available"
+  },
+  "message": "Created Bottle"
+}
+```
 
 ### GET /api/v1/batch/{id}/bottle
 
@@ -578,7 +678,18 @@ Perilaku:
   - perubahan otomatis tercatat sebagai stock movement `adjustment`
     (`in` jika naik, `out` jika turun).
 
-Response 200, `data: "Berhasil"`.
+Response 200: `BotolResponse` object.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "batch_parfume_id": "uuid",
+    "remaining_ml": "decimal",
+    "status": "available"
+  },
+  "message": "Berhasil"
+}
 
 ### DELETE /api/v1/bottle/{id}
 

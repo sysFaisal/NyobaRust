@@ -9,28 +9,28 @@ use crate::{
     c_auth::refresh_token::AccesClaims, dto::{
         ApiResponse, PaginatedResponse, PaginationMeta,
         request::{
-            parfume_req::{CreateParfume, RankingQuery},
+            parfume_req::{CreateParfume, RankingQuery, UpdateParfume},
             revenue_req::RevenueHistoryQuery,
         },
         response::{
             parfume_res::{ParfumeRankingPoint, ParfumeResponse},
             revenue_res::RevenueHistoryPoint,
         },
-    }, error::error::AppError, service::parfume_svc::{svc_create_parfume, svc_delete_parfume, svc_get_all_parfume, svc_get_all_parfume_uni, svc_get_parfume_by_id, svc_get_parfume_history, svc_get_parfume_ranking, RANKING_DEFAULT_PER_PAGE}, state::AppState,
+    }, error::error::AppError, service::parfume_svc::{svc_create_parfume, svc_delete_parfume, svc_get_all_parfume, svc_get_all_parfume_uni, svc_get_parfume_by_id, svc_get_parfume_history, svc_get_parfume_ranking, svc_update_parfume, RANKING_DEFAULT_PER_PAGE}, state::AppState,
 };
 
 pub async fn create_parfum(
     State(state): State<AppState>,
     Extension(access): Extension<AccesClaims>,
     Json(req): Json<CreateParfume>,
-) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<ParfumeResponse>>), AppError> {
     let create = svc_create_parfume(&state.db, &req, &access).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
-            data: (),
-            message: Some(create),
+            data: create,
+            message: Some("Parfume created successfully".to_string()),
         }),
     ))
 }
@@ -78,6 +78,23 @@ pub async fn get_parfume_by_id(
         Json(ApiResponse {
             data: parfume,
             message: None,
+        }),
+    ))
+}
+
+pub async fn update_parfume(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateParfume>,
+) -> Result<(StatusCode, Json<ApiResponse<ParfumeResponse>>), AppError> {
+    let parfume = svc_update_parfume(&state.db, &req, &access, &id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: parfume,
+            message: Some("Berhasil".to_string()),
         }),
     ))
 }
