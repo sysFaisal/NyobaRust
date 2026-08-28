@@ -100,40 +100,21 @@ pub async fn svc_create_user(
     };
 
     let seller = RoleModel::Seller;
-    match &payload.email {
-        Some(email) => {
-            let respon = sqlx::query_as!(
-                UserProfile,
-                r#"
-                INSERT INTO users (username, email, password_hash, role)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id, username, email, created_at"#,
-                payload.username,
-                email.as_str(),
-                password_hash,
-                RoleModel::Seller as RoleModel
-            )
-            .fetch_one(pool)
-            .await?;
+    let respon = sqlx::query_as!(
+        UserProfile,
+        r#"
+        INSERT INTO users (username, email, password_hash, role)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, username, email, created_at"#,
+        payload.username,
+        payload.email.as_ref().map(|e| e.as_str()),
+        password_hash,
+        seller as RoleModel
+    )
+    .fetch_one(pool)
+    .await?;
 
-            Ok(respon)
-        }
-        None => {
-            let respon = sqlx::query_as!(
-                UserProfile,
-                r#"INSERT INTO users (username, password_hash, role)
-                VALUES ($1, $2, $3)
-                RETURNING id, username, email, created_at"#,
-                payload.username,
-                password_hash,
-                RoleModel::Seller as RoleModel
-            )
-            .fetch_one(pool)
-            .await?;
-
-            Ok(respon)
-        }
-    }
+    Ok(respon)
 }
 
 pub async fn svc_update_user(

@@ -407,6 +407,7 @@ struct ParfumeRankingRow {
     pub total_revenue: bigdecimal::BigDecimal,
     pub total_cost: bigdecimal::BigDecimal,
     pub total_orders: i64,
+    pub total_items: i64,
 }
 
 pub const RANKING_DEFAULT_PER_PAGE: i64 = 10;
@@ -466,57 +467,6 @@ pub async fn svc_get_parfume_ranking(
         _ => (None, None),
     };
 
-    let total_items: i64 = match frame {
-        "day" | "week" | "month" => {
-            sqlx::query_scalar!(
-                r#"
-                WITH lines AS (
-                    SELECT bp.parfume_id AS parfume_id
-                    FROM order_items oi
-                    JOIN batch_parfume_bottle bf ON bf.id = oi.bottle_id
-                    JOIN batch_parfume bp ON bp.id = bf.batch_parfume_id
-                    JOIN parfume p ON p.id = bp.parfume_id
-                    JOIN brands br ON br.id = p.brands_id
-                    JOIN decant d ON d.id = oi.decant_id
-                    WHERE br.owner_id = $1
-                      AND oi.status = 'success'
-                      AND oi.created_at >= $2
-                      AND oi.created_at < $3
-                    GROUP BY bp.parfume_id
-                )
-                SELECT COUNT(*) AS "count!"
-                FROM lines"#,
-                owner_id,
-                start_filter.unwrap(),
-                start_date_next.unwrap()
-            )
-            .fetch_one(pool)
-            .await?
-        }
-        _ => {
-            sqlx::query_scalar!(
-                r#"
-                WITH lines AS (
-                    SELECT bp.parfume_id AS parfume_id
-                    FROM order_items oi
-                    JOIN batch_parfume_bottle bf ON bf.id = oi.bottle_id
-                    JOIN batch_parfume bp ON bp.id = bf.batch_parfume_id
-                    JOIN parfume p ON p.id = bp.parfume_id
-                    JOIN brands br ON br.id = p.brands_id
-                    JOIN decant d ON d.id = oi.decant_id
-                    WHERE br.owner_id = $1
-                      AND oi.status = 'success'
-                    GROUP BY bp.parfume_id
-                )
-                SELECT COUNT(*) AS "count!"
-                FROM lines"#,
-                owner_id
-            )
-            .fetch_one(pool)
-            .await?
-        }
-    };
-
     let rows: Vec<ParfumeRankingRow> = match frame {
         "day" | "week" | "month" => {
             sqlx::query_as!(
@@ -539,17 +489,28 @@ pub async fn svc_get_parfume_ranking(
                       AND oi.status = 'success'
                       AND oi.created_at >= $2
                       AND oi.created_at < $3
+                ),
+                grouped AS (
+                    SELECT
+                        parfume_id,
+                        parfume_name,
+                        brands_name,
+                        SUM(total_price) AS total_revenue,
+                        SUM(cost) AS total_cost,
+                        COUNT(*) AS total_orders
+                    FROM lines
+                    GROUP BY parfume_id, parfume_name, brands_name
                 )
                 SELECT
                     parfume_id AS "parfume_id!",
                     parfume_name AS "parfume_name!",
                     brands_name AS "brands_name!",
-                    COALESCE(SUM(total_price), 0) AS "total_revenue!",
-                    COALESCE(SUM(cost), 0) AS "total_cost!",
-                    COUNT(*) AS "total_orders!"
-                FROM lines
-                GROUP BY parfume_id, parfume_name, brands_name
-                ORDER BY 4 DESC
+                    COALESCE(total_revenue, 0) AS "total_revenue!",
+                    COALESCE(total_cost, 0) AS "total_cost!",
+                    total_orders AS "total_orders!",
+                    COUNT(*) OVER() AS "total_items!"
+                FROM grouped
+                ORDER BY total_revenue DESC
                 LIMIT $4 OFFSET $5"#,
                 owner_id,
                 start_filter.unwrap(),
@@ -579,17 +540,28 @@ pub async fn svc_get_parfume_ranking(
                     JOIN decant d ON d.id = oi.decant_id
                     WHERE br.owner_id = $1
                       AND oi.status = 'success'
+                ),
+                grouped AS (
+                    SELECT
+                        parfume_id,
+                        parfume_name,
+                        brands_name,
+                        SUM(total_price) AS total_revenue,
+                        SUM(cost) AS total_cost,
+                        COUNT(*) AS total_orders
+                    FROM lines
+                    GROUP BY parfume_id, parfume_name, brands_name
                 )
                 SELECT
                     parfume_id AS "parfume_id!",
                     parfume_name AS "parfume_name!",
                     brands_name AS "brands_name!",
-                    COALESCE(SUM(total_price), 0) AS "total_revenue!",
-                    COALESCE(SUM(cost), 0) AS "total_cost!",
-                    COUNT(*) AS "total_orders!"
-                FROM lines
-                GROUP BY parfume_id, parfume_name, brands_name
-                ORDER BY 4 DESC
+                    COALESCE(total_revenue, 0) AS "total_revenue!",
+                    COALESCE(total_cost, 0) AS "total_cost!",
+                    total_orders AS "total_orders!",
+                    COUNT(*) OVER() AS "total_items!"
+                FROM grouped
+                ORDER BY total_revenue DESC
                 LIMIT $2 OFFSET $3"#,
                 owner_id,
                 per_page,
@@ -599,6 +571,8 @@ pub async fn svc_get_parfume_ranking(
             .await?
         }
     };
+
+    let total_items = rows.first().map(|r| r.total_items).unwrap_or(0);
 
     let points = rows
         .into_iter()
