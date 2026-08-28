@@ -16,6 +16,15 @@ use crate::{
     service::bottle_svc::{MovementReason, MovementType},
 };
 
+fn parse_owner_uuid(claims: &AccesClaims, ctx: &str) -> Result<Uuid, AppError> {
+    Uuid::parse_str(&claims.sub).map_err(|_| {
+        AppError::InternalServerError(
+            None,
+            Some(format!("{ctx}: gagal parse UUID dari claims")),
+        )
+    })
+}
+
 pub async fn svc_create_order(
     pool: &PgPool,
     req: &CreateOrder,
@@ -215,6 +224,197 @@ pub async fn svc_create_order(
     tx.commit().await?;
 
     Ok("berhasil".to_string())
+}
+
+pub async fn svc_update_order_status(
+    pool: &PgPool,
+    order_id: &Uuid,
+    target_status: OrderStatus,
+    access: &AccesClaims,
+) -> Result<OrderResponse, AppError> {
+    // Hanya Failed dan Refund yang boleh via edit; Success/Pending ditolak
+    if target_status != OrderStatus::Failed && target_status != OrderStatus::Refund {
+        return Err(AppError::BadRequest(
+            Some("status hanya boleh failed atau refund".to_string()),
+            Some("svc_update_order_status: target_status harus failed/refund".to_string()),
+        ));
+    }
+
+    let owner_id = parse_owner_uuid(access, "svc_update_order_status")?;
+
+    let mut tx = pool.begin().await?;
+
+    // Lock order + bottle + batch untuk cegah race, verifikasi owner
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            oi.id AS "id!",
+            oi.status AS "status: OrderStatus",
+            oi.bottle_id AS "bottle_id!",
+            oi.quantity AS "quantity!",
+            d.size_ml AS "size_ml!",
+            (d.size_ml * oi.quantity) AS "consumption!",
+            bf.remaining_ml AS "remaining_ml!",
+            bf.status AS "bottle_status: BottleStatus",
+            bp.quantity_ml AS "cap!"
+        FROM order_items oi
+        JOIN batch_parfume_bottle bf ON bf.id = oi.bottle_id
+        JOIN batch_parfume bp ON bp.id = bf.batch_parfume_id
+        JOIN parfume p ON p.id = bp.parfume_id
+        JOIN brands br ON br.id = p.brands_id
+        JOIN decant d ON d.id = oi.decant_id
+        WHERE oi.id = $1
+          AND br.owner_id = $2
+        FOR UPDATE OF oi, bf
+        "#,
+        order_id,
+        owner_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound(
+            None,
+            Some("svc_update_order_status: order tidak ditemukan / bukan milik user".to_string()),
+        )
+    })?;
+
+    let current = row.status;
+    if current == target_status {
+        tx.commit().await?;
+        // kembalikan data terkini tanpa perubahan stok/movement
+        let existing = sqlx::query_as!(
+            OrderResponse,
+            r#"
+            SELECT
+                oi.id,
+                oi.bottle_id,
+                oi.decant_id,
+                oi.total_price,
+                oi.quantity,
+                oi.price,
+                oi.status AS "status: OrderStatus",
+                d.size_ml,
+                p.name AS parfume_name,
+                br.name AS brands_name,
+                oi.created_at
+            FROM order_items oi
+            JOIN batch_parfume_bottle bf ON bf.id = oi.bottle_id
+            JOIN batch_parfume bp ON bp.id = bf.batch_parfume_id
+            JOIN parfume p ON p.id = bp.parfume_id
+            JOIN brands br ON br.id = p.brands_id
+            JOIN decant d ON d.id = oi.decant_id
+            WHERE oi.id = $1
+              AND br.owner_id = $2
+            "#,
+            order_id,
+            owner_id
+        )
+        .fetch_one(pool)
+        .await?;
+        return Ok(existing);
+    }
+
+    // Hanya dari Success yang boleh ke Failed/Refund
+    if current != OrderStatus::Success {
+        return Err(AppError::BadRequest(
+            Some(format!(
+                "hanya order dengan status success yang bisa diubah ke {}",
+                match target_status {
+                    OrderStatus::Failed => "failed",
+                    OrderStatus::Refund => "refund",
+                    _ => "target",
+                }
+            )),
+            Some(format!(
+                "svc_update_order_status: transisi {:?} -> {:?} tidak diizinkan",
+                current, target_status
+            )),
+        ));
+    }
+
+    let consumption_bd = BigDecimal::from(row.consumption);
+
+    // Cek kapasitas sebelum update (hindari overflow remaining > quantity_ml)
+    if &row.remaining_ml + &consumption_bd > row.cap {
+        return Err(AppError::BadRequest(
+            Some("refund melebihi kapasitas botol (quantity_ml batch)".to_string()),
+            Some("svc_update_order_status: remaining_ml + consumption > quantity_ml".to_string()),
+        ));
+    }
+
+    sqlx::query!(
+        r#"
+        UPDATE order_items
+        SET status = $2
+        WHERE id = $1
+        "#,
+        order_id,
+        target_status as OrderStatus
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE batch_parfume_bottle
+        SET remaining_ml = remaining_ml + $2
+        WHERE id = $1
+        "#,
+        row.bottle_id,
+        consumption_bd
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // INSERT baru, bukan UPDATE — ledger append-only
+    sqlx::query!(
+        r#"
+        INSERT INTO stock_movements (order_items_id, bottle_id, quantity, type, reason)
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+        order_id,
+        row.bottle_id,
+        consumption_bd,
+        MovementType::In as MovementType,
+        MovementReason::Refund as MovementReason,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    let updated = sqlx::query_as!(
+        OrderResponse,
+        r#"
+        SELECT
+            oi.id,
+            oi.bottle_id,
+            oi.decant_id,
+            oi.total_price,
+            oi.quantity,
+            oi.price,
+            oi.status AS "status: OrderStatus",
+            d.size_ml,
+            p.name AS parfume_name,
+            br.name AS brands_name,
+            oi.created_at
+        FROM order_items oi
+        JOIN batch_parfume_bottle bf ON bf.id = oi.bottle_id
+        JOIN batch_parfume bp ON bp.id = bf.batch_parfume_id
+        JOIN parfume p ON p.id = bp.parfume_id
+        JOIN brands br ON br.id = p.brands_id
+        JOIN decant d ON d.id = oi.decant_id
+        WHERE oi.id = $1
+          AND br.owner_id = $2
+        "#,
+        order_id,
+        owner_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(updated)
 }
 
 pub const ORDER_PER_PAGE: i64 = 10;

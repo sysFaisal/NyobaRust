@@ -1,6 +1,6 @@
 use axum::{
     Extension, Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 
@@ -8,11 +8,13 @@ use crate::{
     c_auth::refresh_token::AccesClaims,
     dto::{
         ApiResponse, PaginatedResponse, PaginationMeta,
-        request::order_req::{CreateOrder, OrderPageQuery},
+        request::order_req::{CreateOrder, OrderPageQuery, UpdateOrderStatus},
         response::order_mod::OrderResponse,
     },
     error::error::AppError,
-    service::order_svc::{ORDER_PER_PAGE, svc_create_order, svc_get_all_order},
+    service::order_svc::{
+        ORDER_PER_PAGE, svc_create_order, svc_get_all_order, svc_update_order_status,
+    },
     state::AppState,
 };
 
@@ -53,6 +55,31 @@ pub async fn get_all_order(
                 total_pages,
             },
             message: Some("Succes".to_string()),
+        }),
+    ))
+}
+
+pub async fn update_order(
+    State(state): State<AppState>,
+    Extension(access): Extension<AccesClaims>,
+    Path(id): Path<uuid::Uuid>,
+    Json(req): Json<UpdateOrderStatus>,
+) -> Result<(StatusCode, Json<ApiResponse<OrderResponse>>), AppError> {
+    let updated = svc_update_order_status(&state.db, &id, req.status, &access).await?;
+    let msg = match updated.status {
+        crate::dto::response::order_mod::OrderStatus::Failed => {
+            "order diubah ke failed, stok dikembalikan"
+        }
+        crate::dto::response::order_mod::OrderStatus::Refund => {
+            "order di-refund, stok dikembalikan"
+        }
+        _ => "berhasil",
+    };
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            data: updated,
+            message: Some(msg.to_string()),
         }),
     ))
 }

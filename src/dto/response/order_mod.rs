@@ -10,6 +10,7 @@ pub enum OrderStatus {
     Success,
     Failed,
     Pending,
+    Refund,
 }
 
 pub struct OrderValue {

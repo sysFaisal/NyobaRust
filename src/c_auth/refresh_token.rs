@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use tracing::error;
 use uuid::Uuid;
 
-use crate::env::get_jwt_key;
+use crate::env::{get_access_token_expiry, get_jwt_key, get_refresh_token_expiry};
 use crate::error::error::AppError;
 
 #[derive(Serialize, Deserialize)]
@@ -59,7 +59,7 @@ pub fn generate_access_token(user_id: Uuid, role: &RoleModel) -> Result<String, 
         sub: user_id.to_string(),
         role: role.clone(),
         iat: now.timestamp(),
-        exp: (now + Duration::minutes(15)).timestamp(), //15 menit
+        exp: (now + Duration::minutes(get_access_token_expiry())).timestamp(),
     };
 
     let secret = get_jwt_secret()?;
@@ -85,7 +85,7 @@ pub fn generate_refresh_token() -> RefreshToken {
     rand::rng().fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
-    let expire_at = Utc::now() + Duration::days(7);
+    let expire_at = Utc::now() + Duration::days(get_refresh_token_expiry());
 
     RefreshToken {
         token,

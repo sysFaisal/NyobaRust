@@ -6,7 +6,7 @@ use crate::handlers::brand::{
     create_brands, delete_brands, get_all_brands, get_brands_by_id, update_brands,
 };
 use crate::handlers::decant::{create_decant, delete_decant, get_all_decant, update_decant};
-use crate::handlers::order::{create_order, get_all_order};
+use crate::handlers::order::{create_order, get_all_order, update_order};
 use crate::handlers::parfume::{
     create_parfum, delete_parfume, get_all_parfume, get_all_parfume_uni, get_parfume_by_id,
     get_parfume_history, get_parfume_ranking, update_parfume,
@@ -18,6 +18,7 @@ use crate::handlers::user::{
 };
 use crate::service::brands_svc::svc_get_all_brands;
 use crate::service::user_svc::auth_middleware;
+use crate::env::is_register_enabled;
 use crate::state::AppState;
 use axum::middleware;
 use axum::routing::patch;
@@ -31,11 +32,16 @@ async fn hello() -> &'static str {
 }
 
 pub fn auth_user() -> Router<AppState> {
-    Router::new()
-        .route("/register", post(create_user))
+    let mut router = Router::new()
         .route("/login", post(login_user))
         .route("/refresh", post(refresh_token))
-        .route("/logout", post(logout_user))
+        .route("/logout", post(logout_user));
+
+    if is_register_enabled() {
+        router = router.route("/register", post(create_user));
+    }
+
+    router
 }
 
 pub fn route_user_protected() -> Router<AppState> {
@@ -75,7 +81,12 @@ pub fn router_brands() -> Router<AppState> {
 pub fn router_parfume() -> Router<AppState> {
     Router::new()
         .route("/", post(create_parfum).get(get_all_parfume_uni))
-        .route("/{id}", get(get_parfume_by_id).patch(update_parfume).delete(delete_parfume))
+        .route(
+            "/{id}",
+            get(get_parfume_by_id)
+                .patch(update_parfume)
+                .delete(delete_parfume),
+        )
         .route("/{id}/batch", get(get_all_batch).post(create_batch))
         .route("/{id}/decant", get(get_all_decant).post(create_decant))
         .route("/{id}/history", get(get_parfume_history))
@@ -108,6 +119,7 @@ pub fn router_bottle() -> Router<AppState> {
 pub fn router_order() -> Router<AppState> {
     Router::new()
         .route("/", post(create_order).get(get_all_order))
+        .route("/{id}", patch(update_order))
         .layer(middleware::from_fn(auth_middleware))
 }
 

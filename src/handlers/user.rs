@@ -13,6 +13,7 @@ use crate::c_auth::refresh_token::{AccesClaims, RoleModel};
 use crate::dto::ApiResponse;
 use crate::dto::request::user_req::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::user_res::{LoginResponse, UserProfile};
+use crate::env::{is_cookie_secure, get_refresh_token_expiry};
 use time::OffsetDateTime;
 use crate::error::error::AppError;
 use crate::service::user_svc::{self, svc_refresh_token, svc_logout};
@@ -32,11 +33,15 @@ pub async fn get_all_user(
     State(state): State<AppState>,
     Extension(claims): Extension<AccesClaims>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<UserProfile>>>), AppError> {
+    let start = std::time::Instant::now();
+    tracing::info!(user_id=%claims.sub, role=?claims.role, "get_all_user: masuk service");
+
     if claims.role != RoleModel::Dev {
         return Err(AppError::Forbidden(None, Some("get_all_user: hanya role Dev yang boleh akses".to_string())));
     };
 
     let users = user_svc::svc_get_all_user(&state.db).await?;
+    tracing::info!(user_id=%claims.sub, latency_ms=%start.elapsed().as_millis(), count=%users.len(), "get_all_user: selesai");
 
     Ok((
         StatusCode::OK,
@@ -68,7 +73,10 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(mut payload): Json<CreateUser>,
 ) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
+    let start = std::time::Instant::now();
+    tracing::info!(username=%payload.username, "create_user: masuk service");
     let new_user = user_svc::svc_create_user(&state.dns, &state.db, &mut payload).await?;
+    tracing::info!(user_id=%new_user.id, latency_ms=%start.elapsed().as_millis(), "create_user: selesai");
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
@@ -136,9 +144,10 @@ pub async fn login_user(
 ) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<LoginResponse>>), AppError> {
     let (refresh_cookie_value, expire_at, jwt) = svc_login_user(&state.db, &payload).await?;
 
+    let secure = is_cookie_secure();
     let new_cookie = Cookie::build(("refresh_token", refresh_cookie_value))
         .http_only(true)
-        .secure(false)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .path("/")
         .expires(Expiration::DateTime(expire_at))
@@ -146,7 +155,7 @@ pub async fn login_user(
 
     let remove_cookie = Cookie::build(("refresh_token", ""))
         .http_only(true)
-        .secure(false)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(time::Duration::seconds(-1))
@@ -184,17 +193,19 @@ pub async fn refresh_token(
     let (new_access_token, new_cookie_value) =
         svc_refresh_token(&state.db, family_id, incoming_token).await?;
 
+    let secure = is_cookie_secure();
+    let expiry_days = get_refresh_token_expiry();
     let new_cookie = Cookie::build(("refresh_token", new_cookie_value))
         .http_only(true)
-        .secure(false)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .path("/")
-        .expires(Expiration::DateTime(OffsetDateTime::now_utc() + time::Duration::days(7)))
+        .expires(Expiration::DateTime(OffsetDateTime::now_utc() + time::Duration::days(expiry_days)))
         .build();
 
     let remove_cookie = Cookie::build(("refresh_token", ""))
         .http_only(true)
-        .secure(false)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(time::Duration::seconds(-1))
@@ -230,7 +241,7 @@ pub async fn logout_user(
 
     let expired_cookie = Cookie::build(("refresh_token", ""))
         .http_only(true)
-        .secure(false)
+        .secure(is_cookie_secure())
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(time::Duration::seconds(-1))
