@@ -1,12 +1,12 @@
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, State},
     http::StatusCode,
 };
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims, dto::{
+    c_auth::auth_user::AuthUser, dto::{
         ApiResponse,
         request::botol_req::{CreateBottle, UpdateBottle},
         response::botol_res::BotolResponse,
@@ -17,11 +17,11 @@ use crate::{
 
 pub async fn create_bottle(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateBottle>,
 ) -> Result<(StatusCode, Json<ApiResponse<BotolResponse>>), AppError> {
-    let create = svc_create_bottle(&state.db, &req, &access, &id).await?;
+    let create = svc_create_bottle(&state.db, &req, user.id, &id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -35,10 +35,10 @@ pub async fn create_bottle(
 
 pub async fn get_bottle(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<BotolResponse>>), AppError> {
-    let bottle = svc_get_bottle(&state.db, &access, &id).await?;
+    let bottle = svc_get_bottle(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -51,11 +51,11 @@ pub async fn get_bottle(
 
 pub async fn update_bottle(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBottle>,
 ) -> Result<(StatusCode, Json<ApiResponse<BotolResponse>>), AppError> {
-    let result = svc_update_bottle(&state.db, &access, &id, &req).await?;
+    let result = svc_update_bottle(&state.db, user.id, &id, &req).await?;
 
     Ok((
         StatusCode::OK,
@@ -68,10 +68,10 @@ pub async fn update_bottle(
 
 pub async fn delete_bottle(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
-    let result = svc_delete_bottle(&state.db, &access, &id).await?;
+    let result = svc_delete_bottle(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -84,10 +84,10 @@ pub async fn delete_bottle(
 
 pub async fn get_all_bottle(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<BotolResponse>>>), AppError> {
-    let res = svc_get_all_bottle(&state.db, &access, &id).await?;
+    let res = svc_get_all_bottle(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,

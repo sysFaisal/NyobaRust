@@ -1,11 +1,12 @@
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
 };
+use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
+    c_auth::auth_user::AuthUser,
     dto::{
         ApiResponse, PaginatedResponse, PaginationMeta,
         request::order_req::{CreateOrder, OrderPageQuery, UpdateOrderStatus},
@@ -20,10 +21,10 @@ use crate::{
 
 pub async fn create_order(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Json(req): Json<CreateOrder>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
-    let create = svc_create_order(&state.db, &req, &access).await?;
+    let create = svc_create_order(&state.db, &req, user.id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -36,11 +37,11 @@ pub async fn create_order(
 
 pub async fn get_all_order(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Query(query): Query<OrderPageQuery>,
 ) -> Result<(StatusCode, Json<PaginatedResponse<OrderResponse>>), AppError> {
     let page = query.page.unwrap_or(1).max(1);
-    let (res, total_items) = svc_get_all_order(&state.db, &access, page, ORDER_PER_PAGE).await?;
+    let (res, total_items) = svc_get_all_order(&state.db, user.id, page, ORDER_PER_PAGE).await?;
 
     let total_pages = (total_items + ORDER_PER_PAGE - 1) / ORDER_PER_PAGE;
 
@@ -61,11 +62,11 @@ pub async fn get_all_order(
 
 pub async fn update_order(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<uuid::Uuid>,
     Json(req): Json<UpdateOrderStatus>,
 ) -> Result<(StatusCode, Json<ApiResponse<OrderResponse>>), AppError> {
-    let updated = svc_update_order_status(&state.db, &id, req.status, &access).await?;
+    let updated = svc_update_order_status(&state.db, &id, req.status, user.id).await?;
     let msg = match updated.status {
         crate::dto::response::order_mod::OrderStatus::Failed => {
             "order diubah ke failed, stok dikembalikan"

@@ -1,10 +1,9 @@
-use sqlx::{PgPool, query};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
-        request::decant_req::CreateDecant, request::decant_req::UpdateDecant,
+        request::decant_req::{CreateDecant, UpdateDecant},
         response::decant_res::DecantResponse,
     },
     error::error::AppError,
@@ -13,19 +12,9 @@ use crate::{
 pub async fn svc_create_decant(
     pool: &PgPool,
     req: &CreateDecant,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let owner = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_create_decant: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let query = sqlx::query!(
         r#"
         INSERT INTO decant (
@@ -48,7 +37,7 @@ pub async fn svc_create_decant(
           AND b.deleted_at IS NULL
         "#,
         id,
-        owner,
+        owner_id,
         req.size_ml,
         req.sell_price,
         req.is_active
@@ -68,19 +57,9 @@ pub async fn svc_create_decant(
 
 pub async fn svc_get_all_decant(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Vec<DecantResponse>, AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_all_decant: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res = sqlx::query_as!(
         DecantResponse,
         r#"
@@ -102,7 +81,7 @@ pub async fn svc_get_all_decant(
         AND br.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_all(pool)
     .await?;
@@ -113,19 +92,9 @@ pub async fn svc_get_all_decant(
 pub async fn svc_update_decant(
     pool: &PgPool,
     req: &UpdateDecant,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let owner = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_update_decant: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res_fallback = match sqlx::query_as!(
         CreateDecant,
         r#"
@@ -142,7 +111,7 @@ pub async fn svc_update_decant(
           AND p.deleted_at IS NULL
           AND b.deleted_at IS NULL
         "#,
-        owner,
+        owner_id,
         id
     )
     .fetch_optional(pool)
@@ -191,7 +160,7 @@ pub async fn svc_update_decant(
         size_ml,
         sell_price,
         is_active,
-        owner,
+        owner_id,
         id
     )
     .execute(pool)
@@ -209,19 +178,9 @@ pub async fn svc_update_decant(
 
 pub async fn svc_delete_decant(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let owner = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_delete_decant: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let decant = sqlx::query!(
         r#"
         SELECT
@@ -239,7 +198,7 @@ pub async fn svc_delete_decant(
           AND b.deleted_at IS NULL
         "#,
         id,
-        owner
+        owner_id
     )
     .fetch_optional(pool)
     .await?

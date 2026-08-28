@@ -3,7 +3,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
         request::botol_req::{BottleStatus, CreateBottle, UpdateBottle},
         response::botol_res::BotolResponse,
@@ -29,7 +28,7 @@ pub enum MovementReason {
 
 
 
-pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &AccesClaims, batch_id: &Uuid) -> Result<BotolResponse, AppError> {
+pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, owner_id: Uuid, batch_id: &Uuid) -> Result<BotolResponse, AppError> {
 
     if &req.batch_id != batch_id {
         return Err(AppError::Forbidden(
@@ -37,11 +36,6 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
             Some("svc_create_bottle: hanya Dev yang boleh".to_string()),
         ));
     }
-
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => return Err(AppError::InternalServerError(None, Some("svc_create_bottle: gagal parse UUID dari claims".to_string()))),
-    };
 
     if req.remaining_ml <= BigDecimal::from(0) {
         return Err(AppError::BadRequest(
@@ -65,7 +59,7 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
           AND f.deleted_at IS NULL
           AND b.deleted_at IS NULL
         "#,
-        uuid,
+        owner_id,
         batch_id
     )
     .fetch_optional(pool)
@@ -121,7 +115,7 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
         req.batch_id,
         req.remaining_ml,
         req.status as BottleStatus,
-        uuid
+        owner_id
     )
     .fetch_optional(&mut *tx)
     .await?
@@ -159,21 +153,11 @@ pub async fn svc_create_bottle(pool: &PgPool, req: &CreateBottle, access: &Acces
     Ok(bottle)
 }
 
-fn access_uuid(access: &AccesClaims, operation: &str) -> Result<Uuid, AppError> {
-    Uuid::parse_str(&access.sub).map_err(|_| {
-        AppError::InternalServerError(
-            None,
-            Some(format!("{operation}: gagal parse UUID dari claims")),
-        )
-    })
-}
-
 pub async fn svc_get_bottle(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<BotolResponse, AppError> {
-    let owner_id = access_uuid(access, "svc_get_bottle")?;
     sqlx::query_as!(
         BotolResponse,
         r#"
@@ -205,12 +189,10 @@ pub async fn svc_get_bottle(
 
 pub async fn svc_update_bottle(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
     req: &UpdateBottle,
 ) -> Result<BotolResponse, AppError> {
-    let owner_id = access_uuid(access, "svc_update_bottle")?;
-
     let Some(new_ml) = &req.remaining_ml else {
         let bottle = sqlx::query_as!(
             BotolResponse,
@@ -363,11 +345,9 @@ pub async fn svc_update_bottle(
 
 pub async fn svc_delete_bottle(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let owner_id = access_uuid(access, "svc_delete_bottle")?;
-
     let bottle = sqlx::query!(
         r#"
         SELECT
@@ -437,10 +417,9 @@ pub async fn svc_delete_bottle(
 
 pub async fn svc_get_all_bottle(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Vec<BotolResponse>, AppError> {
-    let owner_id = access_uuid(access, "svc_get_all_bottle")?;
     let res = sqlx::query_as!(
         BotolResponse,
         r#"

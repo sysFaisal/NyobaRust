@@ -1,12 +1,12 @@
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, State},
     http::StatusCode,
 };
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
+    c_auth::auth_user::AuthUser,
     dto::{
         ApiResponse,
         request::batch_req::{CreateBatch, UpdateBatch},
@@ -19,11 +19,11 @@ use crate::{
 
 pub async fn create_batch(
     State(appstate): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateBatch>,
 ) -> Result<(StatusCode, Json<ApiResponse<BatchResponse>>), AppError> {
-    let create = svc_create_batch(&appstate.db, &req, &access, &id).await?;
+    let create = svc_create_batch(&appstate.db, &req, user.id, &id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -36,10 +36,10 @@ pub async fn create_batch(
 
 pub async fn get_all_batch(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<BatchResponse>>>), AppError> {
-    let res = svc_get_all_batch(&state.db, &access, &id).await?;
+    let res = svc_get_all_batch(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -52,11 +52,11 @@ pub async fn get_all_batch(
 
 pub async fn update_batch(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBatch>,
 ) -> Result<(StatusCode, Json<ApiResponse<BatchResponse>>), AppError> {
-    let res = svc_update_batch(&state.db, &req, &access, &id).await?;
+    let res = svc_update_batch(&state.db, &req, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -69,10 +69,10 @@ pub async fn update_batch(
 
 pub async fn delete_batch(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
-    let result = svc_delete_batch(&state.db, &access, &id).await?;
+    let result = svc_delete_batch(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,

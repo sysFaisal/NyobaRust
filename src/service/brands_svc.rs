@@ -1,21 +1,19 @@
-use sqlx::{PgPool, query_as};
+use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
         request::brand_req::{CreateBrands, UpdateBrands},
         response::brand_res::Brand,
     },
     error::error::AppError,
-    handlers::brand,
 };
 
 pub async fn svc_create_brands(
     pool: &PgPool,
     req: &CreateBrands,
-    access: &AccesClaims,
+    owner_id: Uuid,
 ) -> Result<Brand, AppError> {
     let name = req.name_brands.trim();
 
@@ -26,25 +24,12 @@ pub async fn svc_create_brands(
         ));
     }
 
-    let validate = match req.validate() {
-        Ok(_) => {}
-        Err(_) => {
-            return Err(AppError::BadRequest(
-                None,
-                Some("svc_create_brands: validasi input gagal".to_string()),
-            ));
-        }
-    };
-
-    let owner_uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_create_brands: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
+    if req.validate().is_err() {
+        return Err(AppError::BadRequest(
+            None,
+            Some("svc_create_brands: validasi input gagal".to_string()),
+        ));
+    }
 
     let brand = sqlx::query_as!(
         Brand,
@@ -56,7 +41,7 @@ pub async fn svc_create_brands(
             name,
             0 AS "total_parfume!"
         "#,
-        owner_uuid,
+        owner_id,
         name
     )
     .fetch_one(pool)
@@ -67,13 +52,8 @@ pub async fn svc_create_brands(
 
 pub async fn svc_get_all_brands(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
 ) -> Result<Vec<Brand>, AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(e) => return Err(AppError::InternalServerError(None, Some(e.to_string()))),
-    };
-
     let brands = sqlx::query_as!(
         Brand,
         r#"
@@ -90,7 +70,7 @@ pub async fn svc_get_all_brands(
         GROUP BY b.id, b.name
         ORDER BY b.name
     "#,
-        uuid
+        owner_id
     )
     .fetch_all(pool)
     .await?;
@@ -101,7 +81,7 @@ pub async fn svc_get_all_brands(
 pub async fn svc_update_brands(
     pool: &PgPool,
     req: &UpdateBrands,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Brand, AppError> {
     if id != &req.brands_id {
@@ -109,16 +89,6 @@ pub async fn svc_update_brands(
             None,
             Some("svc_update_brands: hanya Dev yang boleh".to_string()),
         ));
-    };
-
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_update_brands: gagal parse UUID dari claims".to_string()),
-            ));
-        }
     };
 
     let brand = sqlx::query_as!(
@@ -134,7 +104,7 @@ pub async fn svc_update_brands(
         "#,
         req.name_brands,
         &req.brands_id,
-        uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?;
@@ -154,19 +124,9 @@ pub async fn svc_update_brands(
 
 pub async fn svc_get_brands_by_id(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Option<Brand>, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_brands_by_id: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let brand = sqlx::query_as!(
         Brand,
         r#"
@@ -184,7 +144,7 @@ pub async fn svc_get_brands_by_id(
         GROUP BY b.id, b.name
         ORDER BY b.name
     "#,
-        uuid,
+        owner_id,
         id
     )
     .fetch_optional(pool)
@@ -195,19 +155,9 @@ pub async fn svc_get_brands_by_id(
 
 pub async fn svc_delete_brand(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_delete_brand: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let brand = sqlx::query!(
         r#"
         SELECT
@@ -239,7 +189,7 @@ pub async fn svc_delete_brand(
           AND b.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?
@@ -323,8 +273,3 @@ pub async fn svc_delete_brand(
 
     Ok("Berhasil dihapus".to_string())
 }
-/*
-pub async fn svc_get_all_brands() -> Result<Vec<Brand>, AppError>{
-    let brands = sqlx::query_as!(Brand, r#"SELECT FROM")
-}
-    */

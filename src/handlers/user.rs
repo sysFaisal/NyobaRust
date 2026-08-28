@@ -1,15 +1,16 @@
 use axum::extract::{Path, State};
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, StatusCode};
-use axum::{Extension, Json};
+use axum::Json;
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, Expiration, SameSite};
 
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::c_auth::auth_user::AuthUser;
 use crate::c_auth::login::svc_login_user;
-use crate::c_auth::refresh_token::{AccesClaims, RoleModel};
+use crate::c_auth::refresh_token::RoleModel;
 use crate::dto::ApiResponse;
 use crate::dto::request::user_req::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::user_res::{LoginResponse, UserProfile};
@@ -31,17 +32,13 @@ E	64 MiB	2	1	lebih berat lagi
 
 pub async fn get_all_user(
     State(state): State<AppState>,
-    Extension(claims): Extension<AccesClaims>,
+    user: AuthUser,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<UserProfile>>>), AppError> {
-    let start = std::time::Instant::now();
-    tracing::info!(user_id=%claims.sub, role=?claims.role, "get_all_user: masuk service");
-
-    if claims.role != RoleModel::Dev {
+    if user.role != RoleModel::Dev {
         return Err(AppError::Forbidden(None, Some("get_all_user: hanya role Dev yang boleh akses".to_string())));
     };
 
     let users = user_svc::svc_get_all_user(&state.db).await?;
-    tracing::info!(user_id=%claims.sub, latency_ms=%start.elapsed().as_millis(), count=%users.len(), "get_all_user: selesai");
 
     Ok((
         StatusCode::OK,
@@ -89,18 +86,13 @@ pub async fn create_user(
 pub async fn delete_data_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Extension(claims): Extension<AccesClaims>,
+    user: AuthUser,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
-    if claims.role != RoleModel::Dev as RoleModel {
+    if user.role != RoleModel::Dev {
         return Err(AppError::Forbidden(None, Some("delete_data_user: hanya role Dev yang boleh akses".to_string())));
     }
 
-    let my_uuid = match Uuid::parse_str(&claims.sub) {
-        Ok(val) => val,
-        Err(_) => return Err(AppError::BadRequest(None, Some("delete_data_user: claims.sub bukan UUID valid".to_string()))),
-    };
-
-    if my_uuid == id {
+    if user.id == id {
         return Err(AppError::Forbidden(None, Some("delete_data_user: tidak boleh hapus akun sendiri".to_string())));
     }
 
@@ -118,12 +110,10 @@ pub async fn delete_data_user(
 pub async fn update_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Extension(claims): Extension<AccesClaims>,
+    user: AuthUser,
     Json(payload): Json<UpdateUser>,
 ) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
-    let my_uuid = Uuid::parse_str(&claims.sub).map_err(|_| AppError::BadRequest(None, Some("update_user: claims.sub bukan UUID valid".to_string())))?;
-
-    if claims.role != RoleModel::Dev && my_uuid != id {
+    if user.role != RoleModel::Dev && user.id != id {
         return Err(AppError::Forbidden(None, Some("update_user: role bukan Dev dan id tidak cocok".to_string())));
     }
 
