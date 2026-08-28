@@ -3,35 +3,17 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
         request::batch_req::{CreateBatch, UpdateBatch},
         response::batch_res::BatchResponse,
     },
     error::error::AppError,
 };
-/*
-    r#"
-    INSERT INTO parfume (
-        brands_id,
-        name,
-        concentration,
-        description
-    )
-    SELECT
-        b.id,
-        $3,
-        $4,
-        $5
-    FROM brands b
-    WHERE b.id = $1
-      AND b.owner_id = $2
-    "#
-*/
+
 pub async fn svc_create_batch(
     pool: &PgPool,
     req: &CreateBatch,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<BatchResponse, AppError> {
     if req.quantity_ml <= BigDecimal::from(0) {
@@ -40,16 +22,6 @@ pub async fn svc_create_batch(
             Some("svc_create_batch: quantity_ml <= 0".to_string()),
         ));
     }
-
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_create_batch: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
 
     let batch = sqlx::query_as!(
         BatchResponse,
@@ -85,7 +57,7 @@ pub async fn svc_create_batch(
         FROM inserted i
         "#,
         id,
-        uuid,
+        owner_id,
         req.quantity_ml,
         req.purchase_price
     )
@@ -107,19 +79,9 @@ pub async fn svc_create_batch(
 
 pub async fn svc_get_all_batch(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Vec<BatchResponse>, AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_all_batch: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res = sqlx::query_as!(
         BatchResponse,
         r#"
@@ -140,7 +102,7 @@ pub async fn svc_get_all_batch(
         AND br.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_all(pool)
     .await?;
@@ -151,19 +113,9 @@ pub async fn svc_get_all_batch(
 pub async fn svc_update_batch(
     pool: &PgPool,
     req: &UpdateBatch,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<BatchResponse, AppError> {
-
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_update_batch: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
 
     let batch = sqlx::query!(
         r#"
@@ -186,7 +138,7 @@ pub async fn svc_update_batch(
           AND f.deleted_at IS NULL
           AND b.deleted_at IS NULL
     "#,
-        uuid,
+        owner_id,
         id,
     )
     .fetch_optional(pool)
@@ -250,19 +202,9 @@ pub async fn svc_update_batch(
 
 pub async fn svc_delete_batch(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_delete_batch: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let batch = sqlx::query!(
         r#"
         SELECT
@@ -278,7 +220,7 @@ pub async fn svc_delete_batch(
             ) AS "has_history!"
         FROM batch_parfume bp
         JOIN parfume f
-            ON f.id = bp.parfume_id
+            ON bp.parfume_id = f.id
         JOIN brands b
             ON f.brands_id = b.id
         WHERE bp.id = $1
@@ -288,7 +230,7 @@ pub async fn svc_delete_batch(
           AND b.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?

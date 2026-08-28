@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
         request::revenue_req::{DailyRevenueQuery, RevenueHistoryQuery},
         response::revenue_res::{
@@ -21,22 +20,10 @@ use crate::{
 pub const DAILY_REVENUE_DEFAULT_DAYS: i64 = 30;
 pub const REVENUE_MAX_RANGE_DAYS: i64 = 366;
 
-fn parse_owner_uuid(context: &str, access: &AccesClaims) -> Result<Uuid, AppError> {
-    match Uuid::parse_str(&access.sub) {
-        Ok(val) => Ok(val),
-        Err(_) => Err(AppError::InternalServerError(
-            None,
-            Some(format!("{context}: gagal parse UUID dari claims")),
-        )),
-    }
-}
-
 pub async fn svc_get_revenue_summary(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
 ) -> Result<RevenueSummaryResponse, AppError> {
-    let uuid = parse_owner_uuid("svc_get_revenue_summary", access)?;
-
     let row = sqlx::query!(
         r#"
         WITH lines AS (
@@ -90,7 +77,7 @@ pub async fn svc_get_revenue_summary(
             COALESCE(SUM(cost), 0) AS "all_time_cost!",
             COUNT(*) AS "all_time_orders!"
         FROM lines"#,
-        uuid
+        owner_id
     )
     .fetch_one(pool)
     .await?;
@@ -105,11 +92,9 @@ pub async fn svc_get_revenue_summary(
 
 pub async fn svc_get_daily_revenue(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     query: &DailyRevenueQuery,
 ) -> Result<Vec<DailyRevenuePoint>, AppError> {
-    let uuid = parse_owner_uuid("svc_get_daily_revenue", access)?;
-
     let to = query.to.unwrap_or_else(|| Utc::now().date_naive());
     let from = query
         .from
@@ -195,7 +180,7 @@ pub async fn svc_get_daily_revenue(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid,
+                owner_id,
                 start,
                 end
             )
@@ -235,7 +220,7 @@ pub async fn svc_get_daily_revenue(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid,
+                owner_id,
                 start,
                 end
             )
@@ -275,7 +260,7 @@ pub async fn svc_get_daily_revenue(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid,
+                owner_id,
                 start,
                 end
             )
@@ -341,11 +326,9 @@ fn date_from_month_index(index: i32) -> NaiveDate {
 
 pub async fn svc_get_revenue_history(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     query: &RevenueHistoryQuery,
 ) -> Result<Vec<RevenueHistoryPoint>, AppError> {
-    let uuid = parse_owner_uuid("svc_get_revenue_history", access)?;
-
     let frame = match query.frame.as_deref() {
         None => HistoryFrame::Day,
         Some(raw) => match HistoryFrame::parse(raw) {
@@ -403,7 +386,7 @@ pub async fn svc_get_revenue_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid,
+                owner_id,
                 start_naive.and_utc(),
                 end_naive.and_utc()
             )
@@ -478,7 +461,7 @@ pub async fn svc_get_revenue_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid,
+                owner_id,
                 start_date
                     .and_hms_opt(0, 0, 0)
                     .expect("jam 00:00:00 selalu valid")
@@ -549,7 +532,7 @@ pub async fn svc_get_revenue_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                uuid
+                owner_id
             )
             .fetch_all(pool)
             .await?;

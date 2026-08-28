@@ -2,10 +2,8 @@ use chrono::{Datelike, Duration as ChronoDuration, Months, NaiveDate, NaiveDateT
 use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
-    c_auth::refresh_token::AccesClaims,
     dto::{
         request::{
             parfume_req::{CreateParfume, RankingQuery},
@@ -25,19 +23,9 @@ pub fn validate_string(value: &str, trimmed: bool, min_length: usize) -> bool {
 
 pub async fn svc_get_all_parfume(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<Vec<ParfumeResponse>, AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_all_parfume: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res = sqlx::query_as!(
         ParfumeResponse,
         r#"
@@ -57,7 +45,7 @@ pub async fn svc_get_all_parfume(
         AND b.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_all(pool)
     .await?;
@@ -68,7 +56,8 @@ pub async fn svc_get_all_parfume(
 pub async fn svc_create_parfume(
     pool: &PgPool,
     req: &CreateParfume,
-    access: &AccesClaims,
+    owner_id: Uuid,
+    _role: crate::c_auth::refresh_token::RoleModel,
 ) -> Result<ParfumeResponse, AppError> {
     if !validate_string(&req.name, true, 3) {
         return Err(AppError::BadRequest(
@@ -105,16 +94,6 @@ pub async fn svc_create_parfume(
         }
 
         None => None,
-    };
-
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_create_parfume: gagal parse UUID dari claims".to_string()),
-            ));
-        }
     };
 
     let res = sqlx::query_as!(
@@ -154,7 +133,7 @@ pub async fn svc_create_parfume(
         JOIN brands b ON b.id = i.brands_id
         "#,
         req.brands_id,
-        uuid,
+        owner_id,
         req.name.trim(),
         concentration,
         desc,
@@ -178,19 +157,9 @@ pub async fn svc_create_parfume(
 pub async fn svc_update_parfume(
     pool: &PgPool,
     req: &crate::dto::request::parfume_req::UpdateParfume,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<ParfumeResponse, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_update_parfume: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let concentration = match &req.concrentration {
         Some(Some(val)) => {
             if !validate_string(&val, true, 3) {
@@ -241,7 +210,7 @@ pub async fn svc_update_parfume(
             p.description
         "#,
         id,
-        uuid,
+        owner_id,
         req.name.as_ref().map(|s| s.trim()),
         concentration,
         desc,
@@ -264,18 +233,8 @@ pub async fn svc_update_parfume(
 
 pub async fn svc_get_all_parfume_uni(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
 ) -> Result<Vec<ParfumeResponse>, AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_all_parfume_uni: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res = sqlx::query_as!(
         ParfumeResponse,
         r#"
@@ -293,7 +252,7 @@ pub async fn svc_get_all_parfume_uni(
         AND p.deleted_at IS NULL
         AND b.deleted_at IS NULL
         "#,
-        uuid,
+        owner_id,
     )
     .fetch_all(pool)
     .await?;
@@ -303,19 +262,9 @@ pub async fn svc_get_all_parfume_uni(
 
 pub async fn svc_get_parfume_by_id(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<ParfumeResponse, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_parfume_by_id: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let res = match sqlx::query_as!(
         ParfumeResponse,
         r#"
@@ -335,7 +284,7 @@ pub async fn svc_get_parfume_by_id(
         AND b.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?
@@ -354,19 +303,9 @@ pub async fn svc_get_parfume_by_id(
 
 pub async fn svc_delete_parfume(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     id: &Uuid,
 ) -> Result<String, AppError> {
-    let uuid = match Uuid::parse_str(access.sub.as_str()) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_delete_parfume: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let parfume = sqlx::query!(
         r#"
         SELECT
@@ -397,7 +336,7 @@ pub async fn svc_delete_parfume(
           AND b.deleted_at IS NULL
         "#,
         id,
-        uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?
@@ -475,19 +414,9 @@ pub const RANKING_MAX_PER_PAGE: i64 = 50;
 
 pub async fn svc_get_parfume_ranking(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     query: &RankingQuery,
 ) -> Result<(Vec<ParfumeRankingPoint>, i64), AppError> {
-    let uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_parfume_ranking: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let frame = match query.frame.as_deref() {
         None | Some("all") => "all",
         Some("day") | Some("daily") => "day",
@@ -557,7 +486,7 @@ pub async fn svc_get_parfume_ranking(
                 )
                 SELECT COUNT(*) AS "count!"
                 FROM lines"#,
-                uuid,
+                owner_id,
                 start_filter.unwrap(),
                 start_date_next.unwrap()
             )
@@ -581,7 +510,7 @@ pub async fn svc_get_parfume_ranking(
                 )
                 SELECT COUNT(*) AS "count!"
                 FROM lines"#,
-                uuid
+                owner_id
             )
             .fetch_one(pool)
             .await?
@@ -622,7 +551,7 @@ pub async fn svc_get_parfume_ranking(
                 GROUP BY parfume_id, parfume_name, brands_name
                 ORDER BY 4 DESC
                 LIMIT $4 OFFSET $5"#,
-                uuid,
+                owner_id,
                 start_filter.unwrap(),
                 start_date_next.unwrap(),
                 per_page,
@@ -662,7 +591,7 @@ pub async fn svc_get_parfume_ranking(
                 GROUP BY parfume_id, parfume_name, brands_name
                 ORDER BY 4 DESC
                 LIMIT $2 OFFSET $3"#,
-                uuid,
+                owner_id,
                 per_page,
                 offset
             )
@@ -710,20 +639,10 @@ fn parfume_history_point(
 
 pub async fn svc_get_parfume_history(
     pool: &PgPool,
-    access: &AccesClaims,
+    owner_id: Uuid,
     parfume_id: &Uuid,
     query: &RevenueHistoryQuery,
 ) -> Result<Vec<RevenueHistoryPoint>, AppError> {
-    let owner_uuid = match Uuid::parse_str(&access.sub) {
-        Ok(val) => val,
-        Err(_) => {
-            return Err(AppError::InternalServerError(
-                None,
-                Some("svc_get_parfume_history: gagal parse UUID dari claims".to_string()),
-            ));
-        }
-    };
-
     let frame = match query.frame.as_deref() {
         None => HistoryFrame::Day,
         Some(raw) => match HistoryFrame::parse(raw) {
@@ -750,7 +669,7 @@ pub async fn svc_get_parfume_history(
           AND b.deleted_at IS NULL
         "#,
         parfume_id,
-        owner_uuid
+        owner_id
     )
     .fetch_optional(pool)
     .await?;
@@ -796,7 +715,7 @@ pub async fn svc_get_parfume_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                owner_uuid,
+                owner_id,
                 parfume_id,
                 start_naive.and_utc(),
                 end_naive.and_utc()
@@ -862,7 +781,7 @@ pub async fn svc_get_parfume_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                owner_uuid,
+                owner_id,
                 parfume_id,
                 start_date.and_hms_opt(0, 0, 0).expect("jam 00:00:00 selalu valid").and_utc(),
                 end_date.and_hms_opt(0, 0, 0).expect("jam 00:00:00 selalu valid").and_utc()
@@ -915,7 +834,7 @@ pub async fn svc_get_parfume_history(
                 FROM lines
                 GROUP BY 1
                 ORDER BY 1"#,
-                owner_uuid,
+                owner_id,
                 parfume_id
             )
             .fetch_all(pool)

@@ -1,9 +1,9 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Extension, Json};
+use axum::Json;
 use uuid::Uuid;
 
-use crate::c_auth::refresh_token::AccesClaims;
+use crate::c_auth::auth_user::AuthUser;
 use crate::dto::ApiResponse;
 use crate::dto::request::brand_req::{CreateBrands, UpdateBrands};
 use crate::dto::response::brand_res::Brand;
@@ -16,10 +16,10 @@ use crate::state::AppState;
 
 pub async fn create_brands(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Json(req): Json<CreateBrands>,
 ) -> Result<(StatusCode, Json<ApiResponse<Brand>>), AppError> {
-    let create = svc_create_brands(&state.db, &req, &access).await?;
+    let create = svc_create_brands(&state.db, &req, user.id).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -32,9 +32,9 @@ pub async fn create_brands(
 
 pub async fn get_all_brands(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<Brand>>>), AppError> {
-    let res = svc_get_all_brands(&state.db, &access).await?;
+    let res = svc_get_all_brands(&state.db, user.id).await?;
 
     Ok((
         StatusCode::OK,
@@ -47,11 +47,11 @@ pub async fn get_all_brands(
 
 pub async fn update_brands(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateBrands>,
 ) -> Result<(StatusCode, Json<ApiResponse<Brand>>), AppError> {
-    let res = svc_update_brands(&state.db, &req, &access, &id).await?;
+    let res = svc_update_brands(&state.db, &req, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -64,10 +64,10 @@ pub async fn update_brands(
 
 pub async fn get_brands_by_id(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<Brand>>), AppError> {
-    let res = svc_get_brands_by_id(&state.db, &access, &id)
+    let res = svc_get_brands_by_id(&state.db, user.id, &id)
         .await?
         .ok_or(AppError::NotFound(
             None,
@@ -85,10 +85,10 @@ pub async fn get_brands_by_id(
 
 pub async fn delete_brands(
     State(state): State<AppState>,
-    Extension(access): Extension<AccesClaims>,
+    user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<String>>), AppError> {
-    let result = svc_delete_brand(&state.db, &access, &id).await?;
+    let result = svc_delete_brand(&state.db, user.id, &id).await?;
 
     Ok((
         StatusCode::OK,
@@ -98,10 +98,3 @@ pub async fn delete_brands(
         }),
     ))
 }
-
-/*
-pub async fn get_all_brands (State(state): State<AppState>) -> Result<(StatusCode, Json<Vec<Brand>>), AppError> {
-    let = parfume_svc::svc_get_all_brands().await?;
-
-}
-     */
