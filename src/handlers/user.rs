@@ -18,6 +18,26 @@ use time::OffsetDateTime;
 use crate::error::error::AppError;
 use crate::service::user_svc::{self, svc_refresh_token, svc_logout};
 
+fn build_refresh_cookie(value: String, expire_at: OffsetDateTime) -> Cookie<'static> {
+    Cookie::build(("refresh_token", value))
+        .http_only(true)
+        .secure(is_cookie_secure())
+        .same_site(SameSite::Lax)
+        .path("/")
+        .expires(Expiration::DateTime(expire_at))
+        .build()
+}
+
+fn build_remove_cookie() -> Cookie<'static> {
+    Cookie::build(("refresh_token", ""))
+        .http_only(true)
+        .secure(is_cookie_secure())
+        .same_site(SameSite::Lax)
+        .path("/")
+        .max_age(time::Duration::seconds(-1))
+        .build()
+}
+
 /*
 Untuk i5-6200U, saya akan coba benchmark begini
 Preset	Memory	Time	Parallelism	Perkiraan karakter
@@ -33,15 +53,11 @@ pub async fn get_all_user(
     State(state): State<AppState>,
     Extension(claims): Extension<AccesClaims>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<UserProfile>>>), AppError> {
-    let start = std::time::Instant::now();
-    tracing::info!(user_id=%claims.sub, role=?claims.role, "get_all_user: masuk service");
-
     if claims.role != RoleModel::Dev {
         return Err(AppError::Forbidden(None, Some("get_all_user: hanya role Dev yang boleh akses".to_string())));
     };
 
     let users = user_svc::svc_get_all_user(&state.db).await?;
-    tracing::info!(user_id=%claims.sub, latency_ms=%start.elapsed().as_millis(), count=%users.len(), "get_all_user: selesai");
 
     Ok((
         StatusCode::OK,
@@ -73,10 +89,7 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(mut payload): Json<CreateUser>,
 ) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
-    let start = std::time::Instant::now();
-    tracing::info!(username=%payload.username, "create_user: masuk service");
     let new_user = user_svc::svc_create_user(&state.dns, &state.db, &mut payload).await?;
-    tracing::info!(user_id=%new_user.id, latency_ms=%start.elapsed().as_millis(), "create_user: selesai");
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse {
@@ -144,22 +157,8 @@ pub async fn login_user(
 ) -> Result<(StatusCode, HeaderMap, Json<ApiResponse<LoginResponse>>), AppError> {
     let (refresh_cookie_value, expire_at, jwt) = svc_login_user(&state.db, &payload).await?;
 
-    let secure = is_cookie_secure();
-    let new_cookie = Cookie::build(("refresh_token", refresh_cookie_value))
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .expires(Expiration::DateTime(expire_at))
-        .build();
-
-    let remove_cookie = Cookie::build(("refresh_token", ""))
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(time::Duration::seconds(-1))
-        .build();
+    let new_cookie = build_refresh_cookie(refresh_cookie_value, expire_at);
+    let remove_cookie = build_remove_cookie();
 
     let mut header = HeaderMap::new();
     header.append(SET_COOKIE, remove_cookie.to_string().parse().unwrap());
@@ -193,23 +192,12 @@ pub async fn refresh_token(
     let (new_access_token, new_cookie_value) =
         svc_refresh_token(&state.db, family_id, incoming_token).await?;
 
-    let secure = is_cookie_secure();
     let expiry_days = get_refresh_token_expiry();
-    let new_cookie = Cookie::build(("refresh_token", new_cookie_value))
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .expires(Expiration::DateTime(OffsetDateTime::now_utc() + time::Duration::days(expiry_days)))
-        .build();
-
-    let remove_cookie = Cookie::build(("refresh_token", ""))
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(time::Duration::seconds(-1))
-        .build();
+    let new_cookie = build_refresh_cookie(
+        new_cookie_value,
+        OffsetDateTime::now_utc() + time::Duration::days(expiry_days),
+    );
+    let remove_cookie = build_remove_cookie();
 
     let mut header = HeaderMap::new();
     header.append(SET_COOKIE, remove_cookie.to_string().parse().unwrap());
@@ -239,13 +227,7 @@ pub async fn logout_user(
         }
     }
 
-    let expired_cookie = Cookie::build(("refresh_token", ""))
-        .http_only(true)
-        .secure(is_cookie_secure())
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(time::Duration::seconds(-1))
-        .build();
+    let expired_cookie = build_remove_cookie();
 
     let mut header = HeaderMap::new();
     header.insert(SET_COOKIE, expired_cookie.to_string().parse().unwrap());

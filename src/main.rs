@@ -5,7 +5,6 @@ use crate::route::route::create_route;
 use hickory_resolver::TokioResolver;
 use hyper::Method;
 use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderValue};
-use jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER;
 use tower_http::cors::{AllowHeaders, CorsLayer};
 
 mod c_auth;
@@ -44,10 +43,6 @@ async fn main() {
         .init();
 
     init().expect("Application environment validation failed");
-
-    if let Err(provider) = DEFAULT_PROVIDER.install_default() {
-        eprintln!("JWT crypto provider already installed: {:?}", provider);
-    }
 
     let database_url = get_database_url().expect("DATABASE_URL is not available");
     let max_conn = get_max_connections();

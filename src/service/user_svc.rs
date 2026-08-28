@@ -4,7 +4,7 @@ use crate::c_auth::refresh_token::{
 };
 use crate::dto::request::user_req::{CreateUser, UpdateUser};
 use crate::dto::response::user_res::UserProfile;
-use crate::env::get_jwt_key;
+use crate::env::{get_jwt_key, get_refresh_token_expiry};
 use crate::error::error::AppError;
 use crate::service::validation::{hash_password, validate_email};
 use axum::extract::Request;
@@ -347,7 +347,7 @@ pub async fn svc_refresh_token(
     let new_access_token = generate_access_token(record.user_id, &role)?;
     let new_refresh_token = generate_refresh_token();
     let new_cookie_value = format!("{}.{}", family_uuid, new_refresh_token.token);
-    let new_expire_at = Utc::now() + chrono::Duration::days(7);
+    let new_expire_at = Utc::now() + chrono::Duration::days(get_refresh_token_expiry());
 
     let update_result = sqlx::query!(
         r#"

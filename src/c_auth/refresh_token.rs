@@ -1,6 +1,3 @@
-use std::alloc::System;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
@@ -36,7 +33,7 @@ pub struct AccesClaims {
     pub exp: i64,    //expire_token
 }
 
-fn get_jwt_secret() -> Result<String, AppError> {
+fn get_jwt_secret() -> Result<&'static str, AppError> {
     let secret = get_jwt_key().map_err(|err| {
         error!(error = %err, "JWT_KEY is missing from environment or .env");
         AppError::InternalServerError(None, Some("JWT_KEY environment variable is missing".to_string()))
@@ -92,9 +89,4 @@ pub fn generate_refresh_token() -> RefreshToken {
         token_hash,
         expire_at,
     }
-}
-
-pub fn token_to_hash_token(token: &String) -> String {
-    let hash = hex::encode(Sha256::digest(token.as_bytes()));
-    return hash;
 }

@@ -1,7 +1,24 @@
 use std::env;
+use std::sync::OnceLock;
 
 pub fn load_env() {
     dotenvy::dotenv().ok();
+}
+
+static JWT_SECRET: OnceLock<String> = OnceLock::new();
+
+pub fn init() -> Result<(), String> {
+    let key = require("JWT_KEY")?;
+    let _ = JWT_SECRET.set(key);
+    let _ = require("DATABASE_URL")?;
+    Ok(())
+}
+
+pub fn get_jwt_key() -> Result<&'static str, String> {
+    JWT_SECRET
+        .get()
+        .map(|s| s.as_str())
+        .ok_or_else(|| "JWT_KEY is not initialized; call init() first".to_string())
 }
 
 fn require(key: &str) -> Result<String, String> {
@@ -24,16 +41,6 @@ fn require(key: &str) -> Result<String, String> {
 fn optional(key: &str, default: &str) -> String {
     load_env();
     env::var(key).unwrap_or_else(|_| default.to_string())
-}
-
-pub fn init() -> Result<(), String> {
-    let _ = require("JWT_KEY")?;
-    let _ = require("DATABASE_URL")?;
-    Ok(())
-}
-
-pub fn get_jwt_key() -> Result<String, String> {
-    require("JWT_KEY")
 }
 
 pub fn get_database_url() -> Result<String, String> {

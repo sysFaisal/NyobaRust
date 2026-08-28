@@ -20,9 +20,7 @@ use crate::{
 };
 
 pub fn validate_string(value: &str, trimmed: bool, min_length: usize) -> bool {
-    let value = if trimmed { value.trim() } else { value };
-
-    value.len() >= min_length
+    if trimmed { value.trim().len() >= min_length } else { value.len() >= min_length }
 }
 
 pub async fn svc_get_all_parfume(
