@@ -1,7 +1,7 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, Expiration, SameSite};
 
@@ -14,10 +14,10 @@ use crate::c_auth::refresh_token::RoleModel;
 use crate::dto::ApiResponse;
 use crate::dto::request::user_req::{CreateUser, LoginUser, UpdateUser};
 use crate::dto::response::user_res::{LoginResponse, UserProfile};
-use crate::env::{is_cookie_secure, get_refresh_token_expiry};
-use time::OffsetDateTime;
+use crate::env::{get_refresh_token_expiry, is_cookie_secure};
 use crate::error::error::AppError;
-use crate::service::user_svc::{self, svc_refresh_token, svc_logout};
+use crate::service::user_svc::{self, svc_logout, svc_refresh_token};
+use time::OffsetDateTime;
 
 fn build_refresh_cookie(value: String, expire_at: OffsetDateTime) -> Cookie<'static> {
     Cookie::build(("refresh_token", value))
@@ -55,7 +55,10 @@ pub async fn get_all_user(
     user: AuthUser,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<UserProfile>>>), AppError> {
     if user.role != RoleModel::Dev {
-        return Err(AppError::Forbidden(None, Some("get_all_user: hanya role Dev yang boleh akses".to_string())));
+        return Err(AppError::Forbidden(
+            None,
+            Some("get_all_user: hanya role Dev yang boleh akses".to_string()),
+        ));
     };
 
     let users = user_svc::svc_get_all_user(&state.db).await?;
@@ -75,7 +78,10 @@ pub async fn get_user_by_id(
 ) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
     let user = user_svc::svc_get_user_by_id(&state.db, &id)
         .await?
-        .ok_or(AppError::NotFound(None, Some("get_user_by_id: user tidak ditemukan".to_string())))?;
+        .ok_or(AppError::NotFound(
+            None,
+            Some("get_user_by_id: user tidak ditemukan".to_string()),
+        ))?;
 
     Ok((
         StatusCode::OK,
@@ -106,11 +112,17 @@ pub async fn delete_data_user(
     user: AuthUser,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
     if user.role != RoleModel::Dev {
-        return Err(AppError::Forbidden(None, Some("delete_data_user: hanya role Dev yang boleh akses".to_string())));
+        return Err(AppError::Forbidden(
+            None,
+            Some("delete_data_user: hanya role Dev yang boleh akses".to_string()),
+        ));
     }
 
     if user.id == id {
-        return Err(AppError::Forbidden(None, Some("delete_data_user: tidak boleh hapus akun sendiri".to_string())));
+        return Err(AppError::Forbidden(
+            None,
+            Some("delete_data_user: tidak boleh hapus akun sendiri".to_string()),
+        ));
     }
 
     let delete_user_response = user_svc::svc_delete_user(&state.db, id).await?;
@@ -131,7 +143,10 @@ pub async fn update_user(
     Json(payload): Json<UpdateUser>,
 ) -> Result<(StatusCode, Json<ApiResponse<UserProfile>>), AppError> {
     if user.role != RoleModel::Dev && user.id != id {
-        return Err(AppError::Forbidden(None, Some("update_user: role bukan Dev dan id tidak cocok".to_string())));
+        return Err(AppError::Forbidden(
+            None,
+            Some("update_user: role bukan Dev dan id tidak cocok".to_string()),
+        ));
     }
 
     let user = user_svc::svc_update_user(&state.dns, &state.db, &id, &payload).await?;
@@ -181,7 +196,11 @@ pub async fn refresh_token(
     ))?;
     let cookie_value = cookie.value();
 
-    let (family_id, incoming_token) = cookie_value.split_once('.').ok_or(AppError::Unauthorized(None, Some("refresh_token: cookie refresh_token format tidak valid".to_string())))?;
+    let (family_id, incoming_token) =
+        cookie_value.split_once('.').ok_or(AppError::Unauthorized(
+            None,
+            Some("refresh_token: cookie refresh_token format tidak valid".to_string()),
+        ))?;
 
     let (new_access_token, new_cookie_value) =
         svc_refresh_token(&state.db, family_id, incoming_token).await?;
