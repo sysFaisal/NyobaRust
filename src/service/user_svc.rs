@@ -6,7 +6,7 @@ use crate::dto::request::user_req::{CreateUser, UpdateUser};
 use crate::dto::response::user_res::UserProfile;
 use crate::env::get_jwt_key;
 use crate::error::error::AppError;
-use crate::service::validation::{hash_password, validate_email};
+use crate::service::validation::{hash_password_async, validate_email};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -89,7 +89,7 @@ pub async fn svc_create_user(
         }
     }
 
-    let password_hash = match hash_password(&payload.password.as_str()) {
+    let password_hash = match hash_password_async(&payload.password).await {
         Ok(hash) => hash,
         Err(_) => {
             return Err(AppError::BadRequest(
@@ -185,7 +185,7 @@ pub async fn svc_update_user(
                     Some("svc_update_user: password kosong".to_string()),
                 ));
             }
-            hash_password(&password).map_err(|_| {
+            hash_password_async(&password).await.map_err(|_| {
                 AppError::BadRequest(
                     None,
                     Some("svc_update_user: hash password gagal".to_string()),

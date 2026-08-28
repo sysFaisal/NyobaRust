@@ -1,7 +1,7 @@
 use crate::c_auth::refresh_token::{RoleModel, generate_access_token, generate_refresh_token};
 use crate::dto::request::user_req::LoginUser;
 use crate::error::error::AppError;
-use crate::service::validation::verify_password;
+use crate::service::validation::verify_password_async;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -35,10 +35,10 @@ pub async fn svc_login_user(
 
     let (user_id, hashed_password, role) = get_id_pw_by_username(pool, &payload.username).await?;
 
-    match verify_password(&payload.password, &hashed_password) {
+    match verify_password_async(&payload.password, &hashed_password).await {
         Ok(true) => {}
         Ok(false) => return Err(AppError::Unauthorized(None, Some("svc_login_user: password salah".to_string()))),
-        Err(_) => return Err(AppError::InternalServerError(None, Some("svc_login_user: error saat verify password".to_string()))),
+        Err(_) => return Err(AppError::InternalServerError(None, Some("svc_login_user: hash password rusak / tidak dapat di-parse".to_string()))),
     }
 
     let family_id = Uuid::new_v4();
