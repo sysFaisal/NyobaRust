@@ -26,8 +26,6 @@ pub async fn svc_create_order(
     // Single round-trip: lookup decant + matching bottle.
     // Returns 0 rows when decant missing; 1 row when found (LEFT JOIN on bottle).
     struct Lookup {
-        decant_id: Uuid,
-        parfume_id: Uuid,
         size_ml: BigDecimal,
         sell_price: BigDecimal,
         is_active: bool,
@@ -40,8 +38,6 @@ pub async fn svc_create_order(
         Lookup,
         r#"
         SELECT
-            d.id AS decant_id,
-            d.parfume_id AS parfume_id,
             d.size_ml AS "size_ml!",
             d.sell_price AS "sell_price!",
             d.is_active AS "is_active!",
